@@ -120,6 +120,7 @@ def _build_services(settings: Settings) -> AppServices:
         renderer=renderer,
         pipeline=pipeline,
         bot_adapter=bot_adapter,
+        delivery_service=delivery_service,
     )
     llm_agent = LLMAgent(settings=settings, registry=tool_registry)
     agent_scheduler = AgentScheduler(settings=settings, agent=llm_agent)

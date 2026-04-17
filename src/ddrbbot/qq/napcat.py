@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import logging
+from pathlib import Path
 from typing import Any, Protocol
 
 import httpx
@@ -47,12 +49,23 @@ class NapCatAdapter:
 
     async def send_news_card(self, target: str, image_path: str, caption: str | None = None) -> str:
         route = self._parse_target(target)
-        message = [{"type": "image", "data": {"file": image_path}}]
+        file_value = self._encode_image_for_napcat(image_path)
+        message = [{"type": "image", "data": {"file": file_value}}]
         if caption:
             message.append({"type": "text", "data": {"text": f"\n{caption}"}})
         payload = {**route, "message": message}
         response = await self._call_action("send_msg", payload)
         return self._extract_message_id(response)
+
+    @staticmethod
+    def _encode_image_for_napcat(image_path: str) -> str:
+        if image_path.startswith(("http://", "https://", "base64://")):
+            return image_path
+        local = Path(image_path).expanduser()
+        if local.is_file():
+            encoded = base64.b64encode(local.read_bytes()).decode("ascii")
+            return f"base64://{encoded}"
+        return image_path
 
     async def send_text(self, target: str, text: str) -> str:
         route = self._parse_target(target)

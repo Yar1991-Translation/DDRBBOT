@@ -9,9 +9,11 @@ import httpx
 
 from ..config import Settings
 from ..database import SQLiteRepository
+from ..delivery import QQDeliveryService
 from ..models import (
     MediaAsset,
     ProcessedEvent,
+    QQSendNewsCardRequest,
     RawEvent,
     RenderPreviewRequest,
     RSSHubCollectRequest,
@@ -72,6 +74,7 @@ def build_default_registry(
     bot_adapter: Any = None,
     bot_adapter_sender: Callable[[str, str], Awaitable[str]] | None = None,
     pipeline_enqueue: Callable[[str], Awaitable[None]] | None = None,
+    delivery_service: QQDeliveryService | None = None,
 ) -> ToolRegistry:
     """Build the default tool set.
 
@@ -335,13 +338,16 @@ def build_default_registry(
         ToolSpec(
             name="send_reply_text",
             description=(
-                "Send a short plain-text reply back to the current QQ chat (private or the group "
-                "where the bot was mentioned). Not allowed outside qq_chat origin."
+                "Send a plain-text message via NapCat. "
+                "Without target_type/target_id it replies to the current QQ chat. "
+                "With them it can send to any group or private user."
             ),
             parameters={
                 "type": "object",
                 "properties": {
-                    "text": {"type": "string", "maxLength": 2000},
+                    "text": {"type": "string"},
+                    "target_type": {"type": "string", "enum": ["group", "private"]},
+                    "target_id": {"type": "string"},
                 },
                 "required": ["text"],
                 "additionalProperties": False,
@@ -349,6 +355,30 @@ def build_default_registry(
             handler=_tool_send_reply_text(bot_adapter_sender),
         )
     )
+    if delivery_service is not None:
+        registry.register(
+            ToolSpec(
+                name="send_news_card_now",
+                description=(
+                    "Enqueue an already-rendered news card for immediate delivery via NapCat. "
+                    "Requires processed_event_id (from render_card_for_review) OR explicit image_path. "
+                    "Bypasses the human review step."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "processed_event_id": {"type": "string"},
+                        "image_path": {"type": "string"},
+                        "target_type": {"type": "string", "enum": ["group", "private"], "default": "group"},
+                        "target_id": {"type": "string"},
+                        "caption": {"type": "string"},
+                    },
+                    "required": ["target_id"],
+                    "additionalProperties": False,
+                },
+                handler=_tool_send_news_card_now(repository, delivery_service),
+            )
+        )
     return registry
 
 
@@ -627,45 +657,29 @@ def _tool_render_card_for_review(
     return handler
 
 
-_ALLOWED_API_PREFIXES = (
-    "/api/health",
-    "/api/render/preview",
-    "/api/render/preview-image",
-    "/api/review/",
-    "/api/review",
-    "/api/collect/",
-    "/api/sources",
-    "/api/qq/delivery/review-queue",
-    "/api/qq/adapter/status",
-    "/api/delivery/dead-letter",
-    "/api/webhook/discord",
-    "/api/ai/chat",
-)
-
-
 def _tool_call_ddrbbot_api(settings: Settings) -> ToolHandler:
     async def handler(context: AgentContext, arguments: dict[str, Any]) -> dict[str, Any]:
         path = str(arguments.get("path") or "").strip()
         method = str(arguments.get("method") or "GET").upper()
-        if method not in {"GET", "POST"}:
-            return {"ok": False, "error": "method must be GET or POST"}
+        if method not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
+            return {"ok": False, "error": "method must be GET/POST/PUT/PATCH/DELETE"}
         if not path.startswith("/"):
             return {"ok": False, "error": "path must start with /"}
-        if not any(path == prefix or path.startswith(prefix) for prefix in _ALLOWED_API_PREFIXES):
-            return {"ok": False, "error": f"path not on allowlist: {path}"}
-        # Never let the agent enqueue QQ deliveries by itself.
-        if path.startswith("/api/qq/send-news-card") or path.startswith("/api/qq/delivery/retry-failed"):
-            return {"ok": False, "error": "direct QQ delivery is not permitted for the agent"}
         base_url = str(arguments.get("base_url") or "http://127.0.0.1:8000").rstrip("/")
         query_raw = arguments.get("query") or {}
         payload = arguments.get("payload")
         params = {str(k): str(v) for k, v in query_raw.items()} if isinstance(query_raw, dict) else None
         try:
-            async with httpx.AsyncClient(timeout=20.0) as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 if method == "GET":
                     response = await client.get(base_url + path, params=params)
                 else:
-                    response = await client.post(base_url + path, params=params, json=payload or {})
+                    response = await client.request(
+                        method,
+                        base_url + path,
+                        params=params,
+                        json=payload or {},
+                    )
         except Exception as exc:
             return {"ok": False, "error": f"call_failed: {exc}"}
         body_text = response.text[:60000]
@@ -688,20 +702,57 @@ def _tool_send_reply_text(
     sender: Callable[[str, str], Awaitable[str]],
 ) -> ToolHandler:
     async def handler(context: AgentContext, arguments: dict[str, Any]) -> dict[str, Any]:
-        if not context.can_send_reply:
-            return {
-                "ok": False,
-                "error": "send_reply_text is only available inside an active qq_chat context",
-            }
         text = str(arguments.get("text") or "").strip()
         if not text:
             return {"ok": False, "error": "text is empty"}
-        route = f"{context.reply_target_type}:{context.reply_target_id}"
+        target_type = str(arguments.get("target_type") or "").strip() or context.reply_target_type
+        target_id = str(arguments.get("target_id") or "").strip() or context.reply_target_id
+        if not target_type or not target_id:
+            return {
+                "ok": False,
+                "error": "target_type/target_id required when not inside a qq_chat context",
+            }
+        route = f"{target_type}:{target_id}"
         try:
-            message_id = await sender(route, text[:2000])
+            message_id = await sender(route, text)
         except Exception as exc:  # pragma: no cover - network dependent
             return {"ok": False, "error": f"send_failed: {exc}"}
         return {"ok": True, "data": {"route": route, "message_id": message_id}}
+
+    return handler
+
+
+def _tool_send_news_card_now(
+    repository: SQLiteRepository,
+    delivery_service: QQDeliveryService,
+) -> ToolHandler:
+    async def handler(context: AgentContext, arguments: dict[str, Any]) -> dict[str, Any]:
+        target_type = str(arguments.get("target_type") or "group").strip()
+        target_id = str(arguments.get("target_id") or "").strip()
+        if target_type not in {"group", "private"} or not target_id:
+            return {"ok": False, "error": "target_type/target_id invalid"}
+        image_path = str(arguments.get("image_path") or "").strip()
+        processed_event_id = str(arguments.get("processed_event_id") or "").strip() or None
+        caption = str(arguments.get("caption") or "").strip() or None
+        if not image_path and processed_event_id:
+            artifact = repository.get_latest_render_artifact(processed_event_id)
+            if artifact and artifact.image_path:
+                image_path = artifact.image_path
+        if not image_path:
+            return {"ok": False, "error": "image_path required (or processed_event_id with rendered image)"}
+        try:
+            result = delivery_service.enqueue_delivery(
+                QQSendNewsCardRequest(
+                    processed_event_id=processed_event_id,
+                    target_type=target_type,  # type: ignore[arg-type]
+                    target_id=target_id,
+                    image_path=image_path,
+                    caption=caption,
+                )
+            )
+        except Exception as exc:
+            return {"ok": False, "error": f"enqueue_failed: {exc}"}
+        return {"ok": True, "data": result.to_dict()}
 
     return handler
 
