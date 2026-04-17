@@ -1,0 +1,153 @@
+Metadata-Version: 2.4
+Name: ddrbbot
+Version: 0.1.0
+Summary: Roblox news aggregation MVP with MD3 rendering and NapCat delivery scaffolding.
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: fastapi<1.0,>=0.115
+Requires-Dist: uvicorn[standard]<1.0,>=0.30
+Requires-Dist: httpx<1.0,>=0.27
+Requires-Dist: jinja2<4.0,>=3.1
+Requires-Dist: pydantic<3.0,>=2.7
+Requires-Dist: playwright<2.0,>=1.52
+Requires-Dist: feedparser<7.0,>=6.0
+Provides-Extra: dev
+Requires-Dist: pytest<9.0,>=8.0; extra == "dev"
+
+# DDRBBOT
+
+根据 `PLAN/PLAN.md` 与 `PLAN/NAPCAT_PLAN.md` 落地的 MVP 骨架，目标是先打通：
+
+- Discord Webhook 接入
+- SQLite 去重与事件存储
+- `asyncio.Queue` 任务编排
+- MD3 风格 HTML 卡片渲染
+- Playwright 截图预留
+- NapCat / OneBot 11 分发适配器
+
+## 当前实现范围
+
+- `POST /api/webhook/discord`
+  - 接收 Discord 公告消息
+  - 按 `source_type + external_id` 去重
+  - 入 SQLite 并推入异步队列
+- 后台 worker
+  - 进行启发式分析
+  - 生成结构化事件
+  - 输出 MD3 HTML 卡片
+  - 如环境允许则尝试 Playwright 截图
+  - 如配置了默认 QQ 群则尝试通过 NapCat 发送
+- `POST /api/render/preview`
+  - 直接用结构化数据生成预览卡片，便于调整 MD3 模板
+- `GET /preview/md3`
+  - 打开基于 `@material/web` 的 MD3 模板预览工作台
+  - 左侧改参数，右侧直接看卡片效果
+- `GET /preview/md3/card`
+  - 单独打开基于 `@material/web` chip/list 组件的卡片预览页
+  - 支持通过 query 参数切换标题、摘要、分类和浅深色主题
+- `POST /api/collect/rss`
+  - 拉取 RSS 并按条目入队，覆盖 Twitter(X)/RSS 方案的 MVP 接口
+- `POST /api/qq/send-news-card`
+  - 手动调用 NapCat 发送图文卡片
+- `POST /api/events/qq`
+  - 接收 QQ 入站事件并存档，为后续命令路由预留入口
+
+## 目录
+
+```text
+src/ddrbbot/
+├─ analyzer.py
+├─ config.py
+├─ database.py
+├─ main.py
+├─ models.py
+├─ pipeline.py
+├─ rendering.py
+├─ services.py
+├─ templates/
+│  ├─ news_card.css
+│  └─ news_card.html.j2
+├─ qq/
+│  ├─ __init__.py
+│  └─ napcat.py
+└─ utils.py
+```
+
+## 本地启动
+
+1. 安装依赖
+
+```bash
+pip install -e .
+```
+
+2. 如需截图，安装 Chromium
+
+```bash
+python -m playwright install chromium
+```
+
+3. 启动服务
+
+```bash
+set PYTHONPATH=src
+uvicorn ddrbbot.main:create_app --factory --reload
+```
+
+4. 打开 MD3 预览页
+
+```text
+http://127.0.0.1:8000/preview/md3
+```
+
+## 关键环境变量
+
+- `DATABASE_PATH`: SQLite 文件路径
+- `ARTIFACTS_DIR`: HTML / PNG 产物目录
+- `SCREENSHOT_ENABLED`: 是否尝试 Playwright 截图
+- `AUTO_DELIVER_ENABLED`: 渲染后是否自动投递
+- `DEFAULT_QQ_GROUP_ID`: 自动投递的默认群号
+- `NAPCAT_BASE_URL`: NapCat / OneBot HTTP API 地址
+- `NAPCAT_ACCESS_TOKEN`: NapCat 访问令牌
+- `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL`
+  - 配置后优先走 OpenAI 兼容接口
+  - 未配置时退回启发式分析
+
+## Material Web
+
+- 预览工作台与卡片模板当前使用 `@material/web`
+- 接入方式采用官方 quick start 推荐的 CDN import map，适合当前这个 FastAPI 服务端渲染 MVP
+- 如果后续要做生产前端构建，可以再切到 npm + bundler 方案
+
+## 示例请求
+
+### Discord Webhook
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/webhook/discord ^
+  -H "Content-Type: application/json" ^
+  -d "{\"id\":\"discord-001\",\"source_name\":\"PHIGHTING Discord\",\"channel_name\":\"announcements\",\"content\":\"New patch notes are live.\",\"author\":{\"username\":\"Official\"}}"
+```
+
+### 渲染预览
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/render/preview ^
+  -H "Content-Type: application/json" ^
+  -d "{\"title\":\"DOORS 发布新预告\",\"summary\":\"官方公布了新楼层相关预告。\",\"highlights\":[\"确认新内容开发中\",\"预告图出现未知实体轮廓\",\"近期还会公布更多信息\"],\"category\":\"teaser\",\"theme\":\"light\",\"game\":\"DOORS\",\"source_name\":\"DOORS 官方账号\"}"
+```
+
+### RSS 拉取
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/collect/rss ^
+  -H "Content-Type: application/json" ^
+  -d "{\"source_name\":\"RSSHub Doors\",\"feed_url\":\"https://example.com/feed.xml\",\"limit\":5}"
+```
+
+## 下一步建议
+
+- 接入真实 RSS / Discord 数据源
+- 用正式 LLM 输出替换启发式分析
+- 将 QQ 适配层拆成独立服务
+- 增加命令路由、管理员白名单和审核页面

@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Smoke Feed</title>
+    <link>https://example.com</link>
+    <description>Smoke test feed</description>
+    <item>
+      <title>Test Patch Notes</title>
+      <link>https://example.com/posts/1</link>
+      <guid>feed-item-1</guid>
+      <description>Patch notes published with a teaser image.</description>
+      <pubDate>Sun, 06 Apr 2026 01:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>
