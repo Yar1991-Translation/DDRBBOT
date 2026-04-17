@@ -185,6 +185,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     sources_upsert = subparsers.add_parser("sources-upsert", help="POST /api/sources")
     _add_payload_input(sources_upsert)
+    subparsers.add_parser(
+        "sources-bootstrap-rsshub2",
+        help="POST /api/sources/bootstrap-rsshub2",
+    )
 
     qq_send = subparsers.add_parser("qq-send", help="POST /api/qq/send-news-card")
     _add_payload_input(qq_send)
@@ -339,6 +343,13 @@ def main() -> int:
             method="POST",
             endpoint="/api/sources",
             payload=_load_payload(args, required=True),
+            **base_kwargs,
+        )
+    if args.command == "sources-bootstrap-rsshub2":
+        return _request_json(
+            method="POST",
+            endpoint="/api/sources/bootstrap-rsshub2",
+            payload={},
             **base_kwargs,
         )
     if args.command == "adapter-status":

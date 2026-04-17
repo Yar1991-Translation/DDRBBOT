@@ -25,6 +25,7 @@ DDRBBOT_API=http://127.0.0.1:8000
 | Ingest | POST | `/api/collect/rss` |
 | Ingest | POST | `/api/collect/rsshub` |
 | Sources | GET / POST | `/api/sources` |
+| Sources | POST | `/api/sources/bootstrap-rsshub2` |
 | Review | GET | `/api/review/items` |
 | Review | GET | `/api/review/items/{processed_event_id}` |
 | Review | POST | `/api/review/{processed_event_id}/rerender` |
@@ -146,10 +147,19 @@ Upsert a source registration.
 {
   "source_type": "rss",
   "name": "DOORS RSSHub",
-  "feed_url": "http://rsshub.app/x/doors_game",
+  "feed_url": "https://rsshub2.asailor.org/x/user/doorsgame",
   "credibility_level": "official"
 }
 ```
+
+### `POST /api/sources/bootstrap-rsshub2`
+
+一键注册 RSSHub2 来源，包含：
+
+- Roblox Forsaken Official X
+- Roblox DOORS Official X
+- Forsaken Wiki (`forsaken2024.fandom.com`)
+- DOORS Wiki (`doors-game.fandom.com`)
 
 ### `GET /api/review/items`
 

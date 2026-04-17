@@ -46,6 +46,10 @@ def _settings(tmp_path: Path) -> Settings:
         llm_agent_schedule_enabled=False,
         llm_agent_temperature=0.3,
         llm_agent_max_reply_chars=2000,
+        llm_agent_shell_enabled=False,
+        llm_agent_shell_timeout_seconds=30.0,
+        llm_agent_shell_output_limit=20000,
+        llm_agent_shell_workdir=None,
     )
 
 

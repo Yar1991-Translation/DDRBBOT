@@ -9,8 +9,14 @@ from ..config import Settings
 from ..copybook import copy_format, copy_text
 from ..database import SQLiteRepository
 from ..delivery import DeliveryError
-from ..llm_agent import AgentContext, LLMAgent
-from ..models import QQInboundEvent
+from ..llm_agent import (
+    AgentContext,
+    ChatService,
+    ChatTurnRequest,
+    LLMAgent,
+    PersonaStore,
+)
+from ..models import CustomPersonaPayload, QQInboundEvent
 from ..pipeline import PipelineCoordinator
 from .napcat import BotAdapter
 from .operations import QQOperationsService, get_test_card_fixtures
@@ -90,6 +96,8 @@ class QQCommandRouter:
         pipeline: PipelineCoordinator,
         operations_service: QQOperationsService,
         llm_agent: LLMAgent | None = None,
+        chat_service: ChatService | None = None,
+        persona_store: PersonaStore | None = None,
     ) -> None:
         self.settings = settings
         self.repository = repository
@@ -97,6 +105,8 @@ class QQCommandRouter:
         self.pipeline = pipeline
         self.operations_service = operations_service
         self.llm_agent = llm_agent
+        self.chat_service = chat_service
+        self.persona_store = persona_store
         self.authorizer = QQCommandAuthorizer(settings)
 
     async def dispatch(self, event: QQInboundEvent) -> QQCommandDispatchResult:
@@ -131,6 +141,19 @@ class QQCommandRouter:
                     event,
                     "ai_chat",
                     lambda inbound: self._handle_ai_chat(inbound, prompt_body),
+                )
+            if lowered == "/persona" or lowered.startswith("/persona "):
+                body = normalized.split(" ", 1)[1].strip() if " " in normalized else ""
+                return await self._dispatch_admin(
+                    event,
+                    "persona",
+                    lambda inbound: self._handle_persona_command(inbound, body),
+                )
+            if lowered == "/forget":
+                return await self._dispatch_admin(
+                    event,
+                    "forget",
+                    self._handle_forget_command,
                 )
             return QQCommandDispatchResult(detail="unknown_command")
 
@@ -172,20 +195,29 @@ class QQCommandRouter:
             is_private=event.event_type == "private_message",
             at_self=event.at_self,
         )
-        system_prompt = copy_text(
-            "llm_agent.chat_system_prompt",
-            (
-                "你是 DDRBBOT 的 QQ 助手。你可以用工具查询来源、审核队列、事件详情，"
-                "必要时用 fetch_url 抓网页，用 render_card_for_review 生成资讯卡进入审核队列。"
-                "所有对当前会话的最终回复必须通过 send_reply_text 工具发送，且不要调用它多次。"
-                "发群卡必须经人工审核批准，不要尝试其他发送路径。"
-            ),
-        )
-        transcript = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt},
-        ]
-        result = await self.llm_agent.run(context, transcript)
+
+        if self.chat_service is None:
+            system_prompt = copy_text(
+                "llm_agent.chat_system_prompt",
+                "你是 DDRBBOT 的 QQ 助手。最终通过 send_reply_text 向当前会话回复。",
+            )
+            transcript = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ]
+            result = await self.llm_agent.run(context, transcript)
+        else:
+            turn = await self.chat_service.run_turn(
+                ChatTurnRequest(
+                    origin="qq_chat",
+                    user_message=prompt,
+                    group_id=event.group_id,
+                    user_id=event.user_id,
+                    agent_context=context,
+                )
+            )
+            result = turn.run_result
+
         if result.final_text and not self._reply_already_sent(result.messages):
             return await self._send_text(
                 event,
@@ -196,6 +228,229 @@ class QQCommandRouter:
             handled=True,
             response_message_id=self._find_reply_message_id(result.messages),
             detail=result.error or "ok",
+        )
+
+    async def _handle_persona_command(
+        self,
+        event: QQInboundEvent,
+        body: str,
+    ) -> QQCommandDispatchResult:
+        if self.persona_store is None or self.chat_service is None:
+            return await self._send_text(
+                event,
+                text=copy_text(
+                    "llm_agent.disabled",
+                    "LLM Agent 未启用。",
+                ),
+                detail="chat_disabled",
+            )
+        trimmed = body.strip()
+        if not trimmed or trimmed.casefold() in {"help", "show", "status"}:
+            return await self._send_persona_status(event)
+        parts = trimmed.split(maxsplit=1)
+        action = parts[0].casefold()
+        payload = parts[1].strip() if len(parts) > 1 else ""
+        if action == "list":
+            return await self._send_persona_list(event)
+        if action == "use":
+            if not payload:
+                return await self._send_text(
+                    event,
+                    text=copy_text(
+                        "chat_commands.persona_usage",
+                        "用法：/persona list | /persona use <key> | /persona custom <设定> | /persona reset | /persona show",
+                    ),
+                    detail="persona_missing_key",
+                )
+            return await self._apply_persona_key(event, payload)
+        if action == "custom":
+            return await self._apply_persona_custom(event, payload)
+        if action == "reset" or action == "clear":
+            return await self._reset_persona(event)
+        return await self._send_text(
+            event,
+            text=copy_text(
+                "chat_commands.persona_usage",
+                "用法：/persona list | /persona use <key> | /persona custom <设定> | /persona reset | /persona show",
+            ),
+            detail="persona_unknown_action",
+        )
+
+    async def _send_persona_status(self, event: QQInboundEvent) -> QQCommandDispatchResult:
+        assert self.chat_service is not None and self.persona_store is not None
+        session = self.chat_service.ensure_session(
+            origin="qq_chat",
+            group_id=event.group_id,
+            user_id=event.user_id,
+        )
+        if session.custom_persona and session.custom_persona.system_prompt.strip():
+            text = copy_format(
+                "chat_commands.persona_active_custom",
+                "当前会话使用自定义角色：{label}",
+                label=session.custom_persona.label or "自定义角色",
+            )
+        elif session.persona_id:
+            persona = self.repository.get_chat_persona(session.persona_id)
+            if persona is None:
+                text = copy_text(
+                    "chat_commands.persona_active_default",
+                    "当前会话使用默认助手角色。",
+                )
+            else:
+                text = copy_format(
+                    "chat_commands.persona_active",
+                    "当前会话角色：{label}（key={key}）",
+                    label=persona.label,
+                    key=persona.persona_key,
+                )
+        else:
+            text = copy_text(
+                "chat_commands.persona_active_default",
+                "当前会话使用默认助手角色。",
+            )
+        return await self._send_text(event, text=text)
+
+    async def _send_persona_list(self, event: QQInboundEvent) -> QQCommandDispatchResult:
+        assert self.persona_store is not None
+        personas = self.persona_store.list_personas()
+        if not personas:
+            return await self._send_text(
+                event,
+                text=copy_text(
+                    "chat_commands.persona_active_default",
+                    "当前会话使用默认助手角色。",
+                ),
+            )
+        lines = [copy_text("chat_commands.persona_list_title", "可用角色：")]
+        for persona in personas:
+            lines.append(
+                copy_format(
+                    "chat_commands.persona_list_item",
+                    "- {key}: {label}",
+                    key=persona.persona_key,
+                    label=persona.label,
+                )
+            )
+        return await self._send_text(event, text="\n".join(lines))
+
+    async def _apply_persona_key(
+        self,
+        event: QQInboundEvent,
+        persona_key: str,
+    ) -> QQCommandDispatchResult:
+        assert self.chat_service is not None and self.persona_store is not None
+        key = persona_key.strip()
+        session = self.chat_service.ensure_session(
+            origin="qq_chat",
+            group_id=event.group_id,
+            user_id=event.user_id,
+        )
+        try:
+            self.persona_store.update_session_persona(
+                session,
+                persona_id_or_key=key,
+            )
+        except ValueError:
+            return await self._send_text(
+                event,
+                text=copy_format(
+                    "chat_commands.persona_not_found",
+                    "找不到角色：{key}。",
+                    key=key,
+                ),
+                detail="persona_not_found",
+            )
+        persona = self.repository.get_chat_persona(key)
+        label = persona.label if persona else key
+        return await self._send_text(
+            event,
+            text=copy_format(
+                "chat_commands.persona_switched",
+                "已切换角色为 {label}（key={key}）。",
+                label=label,
+                key=persona.persona_key if persona else key,
+            ),
+        )
+
+    async def _apply_persona_custom(
+        self,
+        event: QQInboundEvent,
+        payload: str,
+    ) -> QQCommandDispatchResult:
+        assert self.chat_service is not None and self.persona_store is not None
+        body = payload.strip()
+        if not body:
+            return await self._send_text(
+                event,
+                text=copy_text(
+                    "chat_commands.persona_custom_empty",
+                    "自定义角色内容不能为空。",
+                ),
+                detail="persona_custom_empty",
+            )
+        session = self.chat_service.ensure_session(
+            origin="qq_chat",
+            group_id=event.group_id,
+            user_id=event.user_id,
+        )
+        custom = CustomPersonaPayload(
+            label="自定义角色",
+            description="",
+            system_prompt=body,
+            allow_tools=True,
+        )
+        self.persona_store.update_session_persona(session, custom=custom)
+        return await self._send_text(
+            event,
+            text=copy_text(
+                "chat_commands.persona_custom_saved",
+                "已保存自定义角色设定，接下来按新人格回复。",
+            ),
+        )
+
+    async def _reset_persona(self, event: QQInboundEvent) -> QQCommandDispatchResult:
+        assert self.chat_service is not None and self.persona_store is not None
+        session = self.chat_service.ensure_session(
+            origin="qq_chat",
+            group_id=event.group_id,
+            user_id=event.user_id,
+        )
+        self.persona_store.update_session_persona(session, reset=True)
+        return await self._send_text(
+            event,
+            text=copy_text(
+                "chat_commands.persona_reset",
+                "已清除角色设定，恢复默认助手。",
+            ),
+        )
+
+    async def _handle_forget_command(
+        self,
+        event: QQInboundEvent,
+    ) -> QQCommandDispatchResult:
+        if self.chat_service is None:
+            return await self._send_text(
+                event,
+                text=copy_text("llm_agent.disabled", "LLM Agent 未启用。"),
+                detail="chat_disabled",
+            )
+        session = self.chat_service.ensure_session(
+            origin="qq_chat",
+            group_id=event.group_id,
+            user_id=event.user_id,
+        )
+        self.repository.clear_chat_messages(session.id)
+        self.repository.update_chat_session(
+            session.id,
+            summary="",
+            touch_summary=True,
+        )
+        return await self._send_text(
+            event,
+            text=copy_text(
+                "chat_commands.forget_done",
+                "已清空当前会话的历史记忆。",
+            ),
         )
 
     @staticmethod

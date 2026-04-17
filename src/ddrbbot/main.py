@@ -37,8 +37,25 @@ from .models import (
     SourceRegisterRequest,
 )
 from .delivery_worker import DeliveryWorker
-from .llm_agent import AgentContext, AgentScheduler, LLMAgent, build_default_registry
-from .models import AIChatRequest
+from .llm_agent import (
+    AgentContext,
+    AgentScheduler,
+    ChatService,
+    ChatTurnRequest,
+    LLMAgent,
+    PersonaStore,
+    build_default_registry,
+    coerce_custom_persona,
+)
+from .models import (
+    AIChatRequest,
+    ChatPersona,
+    KnowledgeUpsertRequest,
+    PersonaUpsertRequest,
+    ProfileUpsertRequest,
+    ChatKnowledgeItem,
+    ChatProfile,
+)
 from .pipeline import PipelineCoordinator
 from .qq.commands import QQCommandRouter
 from .qq.napcat import NapCatAdapter, normalize_inbound_event
@@ -52,6 +69,32 @@ from .logging_setup import configure_logging
 from .utils import make_external_id, utc_now
 
 
+def _rsshub2_seed_sources() -> list[dict[str, str]]:
+    base = "https://rsshub2.asailor.org"
+    return [
+        {
+            "name": "Roblox Forsaken Official X",
+            "feed_url": f"{base}/x/user/forsaken2024",
+            "credibility_level": "official",
+        },
+        {
+            "name": "Roblox DOORS Official X",
+            "feed_url": f"{base}/x/user/doorsgame",
+            "credibility_level": "official",
+        },
+        {
+            "name": "Forsaken Wiki",
+            "feed_url": f"{base}/fandom/wiki/forsaken2024",
+            "credibility_level": "community",
+        },
+        {
+            "name": "DOORS Wiki",
+            "feed_url": f"{base}/fandom/wiki/doors-game",
+            "credibility_level": "community",
+        },
+    ]
+
+
 def create_app() -> FastAPI:
     settings = load_settings()
     configure_logging(settings)
@@ -60,6 +103,7 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         services.repository.initialize()
+        services.persona_store.seed_defaults()
         await services.pipeline.start()
         await services.delivery_worker.start()
         await services.ws_client.start()
@@ -120,6 +164,12 @@ def _build_services(settings: Settings) -> AppServices:
         delivery_service=delivery_service,
     )
     llm_agent = LLMAgent(settings=settings, registry=tool_registry)
+    persona_store = PersonaStore(repository=repository)
+    chat_service = ChatService(
+        repository=repository,
+        llm_agent=llm_agent,
+        persona_store=persona_store,
+    )
     agent_scheduler = AgentScheduler(settings=settings, agent=llm_agent)
     command_router = QQCommandRouter(
         settings=settings,
@@ -128,6 +178,8 @@ def _build_services(settings: Settings) -> AppServices:
         pipeline=pipeline,
         operations_service=operations_service,
         llm_agent=llm_agent,
+        chat_service=chat_service,
+        persona_store=persona_store,
     )
     ws_client = NapCatWSClient(
         settings=settings,
@@ -148,6 +200,8 @@ def _build_services(settings: Settings) -> AppServices:
         ws_client=ws_client,
         llm_agent=llm_agent,
         agent_scheduler=agent_scheduler,
+        persona_store=persona_store,
+        chat_service=chat_service,
     )
 
 
@@ -595,6 +649,25 @@ def _register_routes(app: FastAPI) -> None:
         )
         return {"ok": True, "source": SourcePublic.model_validate(row).model_dump()}
 
+    @app.post("/api/sources/bootstrap-rsshub2")
+    async def bootstrap_rsshub2_sources(request: Request) -> dict[str, Any]:
+        services = _services(request)
+        registered: list[dict[str, Any]] = []
+        for item in _rsshub2_seed_sources():
+            feed_url = validate_rsshub_feed_url(
+                item["feed_url"],
+                host_markers=services.settings.rsshub_host_markers,
+                extra_hosts=services.settings.rsshub_extra_hosts,
+            )
+            row = services.repository.upsert_source_registration(
+                source_type="rss",
+                name=item["name"],
+                feed_url=feed_url,
+                credibility_level=item["credibility_level"],
+            )
+            registered.append(SourcePublic.model_validate(row).model_dump())
+        return {"ok": True, "count": len(registered), "sources": registered}
+
     @app.post("/api/qq/send-news-card")
     async def send_news_card(payload: QQSendNewsCardRequest, request: Request) -> dict[str, Any]:
         services = _services(request)
@@ -687,28 +760,166 @@ def _register_routes(app: FastAPI) -> None:
             )
         origin = payload.origin if payload.origin in {"api", "scheduler", "qq_chat"} else "api"
         context = AgentContext(origin=origin, extras=dict(payload.extras))
-        system_prompt = copy_text(
-            "llm_agent.api_system_prompt",
-            (
-                "你是 DDRBBOT 的调试 Agent。你可以调用可用工具完成查询、采集、生成审核卡等动作。"
-                "当前无 QQ 会话上下文，不要调用 send_reply_text。"
-                "所有群卡仍需人工审核批准。返回一段中文总结作为最终文本。"
-            ),
+        custom_persona = coerce_custom_persona(payload.custom_persona)
+
+        turn = await services.chat_service.run_turn(
+            ChatTurnRequest(
+                origin=origin,
+                user_message=payload.message,
+                explicit_session_id=payload.session_id,
+                user_id=str(payload.extras.get("user_id") or "") or None,
+                group_id=str(payload.extras.get("group_id") or "") or None,
+                override_persona_id=payload.persona_id,
+                override_custom_persona=custom_persona,
+                history_limit=payload.history_limit,
+                include_knowledge=payload.include_knowledge,
+                reset_session=payload.reset_session,
+                agent_context=context,
+            )
         )
-        result = await services.llm_agent.run(
-            context,
-            [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": payload.message},
-            ],
-        )
+        result = turn.run_result
+        persona_info = {
+            "key": turn.built_context.persona.key,
+            "label": turn.built_context.persona.label,
+            "is_custom": turn.built_context.persona.is_custom,
+        }
         return {
             "ok": not bool(result.error),
             "final_text": result.final_text,
             "tool_steps": result.tool_steps,
             "error": result.error,
             "messages": result.messages,
+            "session_id": turn.session.id,
+            "session_key": turn.session.session_key,
+            "persona": persona_info,
+            "history_count": len(turn.built_context.history),
+            "knowledge_count": len(turn.built_context.knowledge),
+            "notes": turn.built_context.notes,
         }
+
+    @app.get("/api/chat/personas")
+    async def list_chat_personas(request: Request) -> dict[str, Any]:
+        services = _services(request)
+        personas = services.persona_store.list_personas()
+        return {
+            "ok": True,
+            "personas": [persona.model_dump(mode="json") for persona in personas],
+        }
+
+    @app.post("/api/chat/personas")
+    async def upsert_chat_persona(
+        payload: PersonaUpsertRequest, request: Request
+    ) -> dict[str, Any]:
+        services = _services(request)
+        persona = ChatPersona(
+            persona_key=payload.persona_key.strip(),
+            label=payload.label.strip() or payload.persona_key.strip(),
+            description=payload.description.strip(),
+            system_prompt=payload.system_prompt.strip(),
+            is_builtin=False,
+            allow_tools=payload.allow_tools,
+            tone=payload.tone,
+        )
+        saved = services.repository.upsert_chat_persona(persona)
+        return {"ok": True, "persona": saved.model_dump(mode="json")}
+
+    @app.delete("/api/chat/personas/{persona_key}")
+    async def delete_chat_persona(persona_key: str, request: Request) -> dict[str, Any]:
+        services = _services(request)
+        removed = services.repository.delete_chat_persona(persona_key)
+        return {"ok": removed}
+
+    @app.get("/api/chat/knowledge")
+    async def list_chat_knowledge(
+        request: Request,
+        query: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        services = _services(request)
+        if query:
+            items = services.repository.search_chat_knowledge_items(query, limit=limit)
+        else:
+            items = services.repository.list_chat_knowledge_items(limit=limit)
+        return {
+            "ok": True,
+            "items": [item.model_dump(mode="json") for item in items],
+        }
+
+    @app.post("/api/chat/knowledge")
+    async def upsert_chat_knowledge(
+        payload: KnowledgeUpsertRequest, request: Request
+    ) -> dict[str, Any]:
+        services = _services(request)
+        tags = [str(tag).strip() for tag in payload.tags if str(tag).strip()]
+        item = ChatKnowledgeItem(
+            id=payload.id or ChatKnowledgeItem().id,
+            topic=payload.topic.strip(),
+            content=payload.content.strip(),
+            tags=tags,
+            priority=payload.priority,
+        )
+        saved = services.repository.upsert_chat_knowledge_item(item)
+        return {"ok": True, "item": saved.model_dump(mode="json")}
+
+    @app.delete("/api/chat/knowledge/{item_id}")
+    async def delete_chat_knowledge(item_id: str, request: Request) -> dict[str, Any]:
+        services = _services(request)
+        removed = services.repository.delete_chat_knowledge_item(item_id)
+        return {"ok": removed}
+
+    @app.post("/api/chat/profiles")
+    async def upsert_chat_profile(
+        payload: ProfileUpsertRequest, request: Request
+    ) -> dict[str, Any]:
+        services = _services(request)
+        profile = ChatProfile(
+            scope=payload.scope.strip() or "qq_private",
+            user_id=payload.user_id.strip(),
+            display_name=payload.display_name,
+            preferences=dict(payload.preferences),
+            notes=payload.notes,
+        )
+        saved = services.repository.upsert_chat_profile(profile)
+        return {"ok": True, "profile": saved.model_dump(mode="json")}
+
+    @app.get("/api/chat/profiles/{scope}/{user_id}")
+    async def get_chat_profile(
+        scope: str, user_id: str, request: Request
+    ) -> dict[str, Any]:
+        services = _services(request)
+        profile = services.repository.get_chat_profile(scope=scope, user_id=user_id)
+        if profile is None:
+            raise HTTPException(status_code=404, detail="profile not found")
+        return {"ok": True, "profile": profile.model_dump(mode="json")}
+
+    @app.get("/api/chat/sessions/{session_id}/messages")
+    async def list_chat_session_messages(
+        session_id: str, request: Request, limit: int = 50
+    ) -> dict[str, Any]:
+        services = _services(request)
+        session = services.repository.get_chat_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        messages = services.repository.list_chat_messages(session_id, limit=limit)
+        return {
+            "ok": True,
+            "session": session.model_dump(mode="json"),
+            "messages": [m.model_dump(mode="json") for m in messages],
+        }
+
+    @app.delete("/api/chat/sessions/{session_id}/messages")
+    async def clear_chat_session_messages(
+        session_id: str, request: Request
+    ) -> dict[str, Any]:
+        services = _services(request)
+        session = services.repository.get_chat_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        services.repository.clear_chat_messages(session_id)
+        services.repository.update_chat_session(
+            session_id, summary="", touch_summary=True
+        )
+        return {"ok": True}
 
     @app.get("/api/delivery/dead-letter")
     async def list_dead_letter(request: Request, limit: int = 20) -> dict[str, Any]:

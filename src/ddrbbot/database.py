@@ -8,6 +8,11 @@ from pathlib import Path
 from typing import Any
 
 from .models import (
+    ChatKnowledgeItem,
+    ChatMessageRecord,
+    ChatPersona,
+    ChatProfile,
+    ChatSession,
     DeliveryLog,
     DeliveryRecord,
     MediaAsset,
@@ -125,6 +130,75 @@ CREATE TABLE IF NOT EXISTS platform_events (
   payload_json TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS chat_sessions (
+  id TEXT PRIMARY KEY,
+  session_key TEXT NOT NULL UNIQUE,
+  origin TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  group_id TEXT,
+  user_id TEXT,
+  persona_id TEXT,
+  custom_persona_json TEXT,
+  summary TEXT NOT NULL DEFAULT '',
+  summary_updated_at TEXT,
+  last_message_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL,
+  name TEXT,
+  tool_call_id TEXT,
+  tool_calls_json TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY(session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_messages_session
+  ON chat_messages(session_id, created_at);
+
+CREATE TABLE IF NOT EXISTS chat_profiles (
+  id TEXT PRIMARY KEY,
+  scope TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  display_name TEXT,
+  preferences_json TEXT NOT NULL DEFAULT '{}',
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(scope, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS chat_personas (
+  id TEXT PRIMARY KEY,
+  persona_key TEXT NOT NULL UNIQUE,
+  label TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  system_prompt TEXT NOT NULL,
+  is_builtin INTEGER NOT NULL DEFAULT 0,
+  allow_tools INTEGER NOT NULL DEFAULT 1,
+  tone TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS chat_knowledge_items (
+  id TEXT PRIMARY KEY,
+  topic TEXT NOT NULL,
+  content TEXT NOT NULL,
+  tags_json TEXT NOT NULL DEFAULT '[]',
+  priority INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_knowledge_priority
+  ON chat_knowledge_items(priority DESC, updated_at DESC);
 """
 
 
@@ -722,6 +796,439 @@ class SQLiteRepository:
             )
             connection.commit()
 
+    def get_or_create_chat_session(
+        self,
+        *,
+        session_key: str,
+        origin: str,
+        scope: str,
+        group_id: str | None = None,
+        user_id: str | None = None,
+    ) -> ChatSession:
+        now = utc_now()
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM chat_sessions WHERE session_key = ?",
+                (session_key,),
+            ).fetchone()
+            if row:
+                return self._row_to_chat_session(row)
+            session = ChatSession(
+                session_key=session_key,
+                origin=origin,
+                scope=scope,
+                group_id=group_id,
+                user_id=user_id,
+                created_at=now,
+                updated_at=now,
+            )
+            connection.execute(
+                """
+                INSERT INTO chat_sessions (
+                  id, session_key, origin, scope, group_id, user_id,
+                  persona_id, custom_persona_json, summary, summary_updated_at,
+                  last_message_at, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session.id,
+                    session.session_key,
+                    session.origin,
+                    session.scope,
+                    session.group_id,
+                    session.user_id,
+                    session.persona_id,
+                    None,
+                    session.summary,
+                    None,
+                    None,
+                    isoformat_z(session.created_at),
+                    isoformat_z(session.updated_at),
+                ),
+            )
+            connection.commit()
+            return session
+
+    def get_chat_session(self, session_id: str) -> ChatSession | None:
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM chat_sessions WHERE id = ?",
+                (session_id,),
+            ).fetchone()
+        return self._row_to_chat_session(row) if row else None
+
+    def get_chat_session_by_key(self, session_key: str) -> ChatSession | None:
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM chat_sessions WHERE session_key = ?",
+                (session_key,),
+            ).fetchone()
+        return self._row_to_chat_session(row) if row else None
+
+    def update_chat_session(
+        self,
+        session_id: str,
+        *,
+        persona_id: Any = _RAW_PATCH_MISSING,
+        custom_persona: Any = _RAW_PATCH_MISSING,
+        summary: str | None = None,
+        touch_summary: bool = False,
+        last_message_at: datetime | None = None,
+    ) -> None:
+        updates: list[str] = []
+        parameters: list[Any] = []
+        if persona_id is not _RAW_PATCH_MISSING:
+            updates.append("persona_id = ?")
+            parameters.append(persona_id)
+        if custom_persona is not _RAW_PATCH_MISSING:
+            updates.append("custom_persona_json = ?")
+            parameters.append(
+                json.dumps(custom_persona, ensure_ascii=False)
+                if custom_persona is not None
+                else None
+            )
+        if summary is not None:
+            updates.append("summary = ?")
+            parameters.append(summary)
+        if touch_summary:
+            updates.append("summary_updated_at = ?")
+            parameters.append(isoformat_z(utc_now()))
+        if last_message_at is not None:
+            updates.append("last_message_at = ?")
+            parameters.append(isoformat_z(last_message_at))
+        if not updates:
+            return
+        updates.append("updated_at = ?")
+        parameters.append(isoformat_z(utc_now()))
+        parameters.append(session_id)
+        statement = f"UPDATE chat_sessions SET {', '.join(updates)} WHERE id = ?"
+        with self._lock, self._connect() as connection:
+            connection.execute(statement, tuple(parameters))
+            connection.commit()
+
+    def clear_chat_messages(self, session_id: str) -> None:
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                "DELETE FROM chat_messages WHERE session_id = ?",
+                (session_id,),
+            )
+            connection.commit()
+
+    def append_chat_message(self, record: ChatMessageRecord) -> None:
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO chat_messages (
+                  id, session_id, role, content, name, tool_call_id,
+                  tool_calls_json, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.id,
+                    record.session_id,
+                    record.role,
+                    record.content,
+                    record.name,
+                    record.tool_call_id,
+                    json.dumps(record.tool_calls, ensure_ascii=False)
+                    if record.tool_calls
+                    else None,
+                    isoformat_z(record.created_at),
+                ),
+            )
+            connection.commit()
+
+    def list_chat_messages(
+        self,
+        session_id: str,
+        *,
+        limit: int = 20,
+    ) -> list[ChatMessageRecord]:
+        capped = max(1, min(limit, 200))
+        with self._lock, self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM chat_messages
+                WHERE session_id = ?
+                ORDER BY datetime(created_at) DESC, rowid DESC
+                LIMIT ?
+                """,
+                (session_id, capped),
+            ).fetchall()
+        records = [self._row_to_chat_message(row) for row in rows]
+        records.reverse()
+        return records
+
+    def count_chat_messages(self, session_id: str) -> int:
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) FROM chat_messages WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+        return int(row[0]) if row else 0
+
+    def trim_chat_messages(self, session_id: str, *, keep_latest: int) -> int:
+        kept = max(keep_latest, 0)
+        with self._lock, self._connect() as connection:
+            cursor = connection.execute(
+                """
+                DELETE FROM chat_messages
+                WHERE session_id = ?
+                  AND rowid NOT IN (
+                    SELECT rowid FROM chat_messages
+                    WHERE session_id = ?
+                    ORDER BY datetime(created_at) DESC, rowid DESC
+                    LIMIT ?
+                  )
+                """,
+                (session_id, session_id, kept),
+            )
+            connection.commit()
+            return int(cursor.rowcount or 0)
+
+    def upsert_chat_profile(self, profile: ChatProfile) -> ChatProfile:
+        now = utc_now()
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT id, created_at FROM chat_profiles WHERE scope = ? AND user_id = ?",
+                (profile.scope, profile.user_id),
+            ).fetchone()
+            if row:
+                connection.execute(
+                    """
+                    UPDATE chat_profiles
+                    SET display_name = ?, preferences_json = ?, notes = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        profile.display_name,
+                        json.dumps(profile.preferences, ensure_ascii=False),
+                        profile.notes,
+                        isoformat_z(now),
+                        row["id"],
+                    ),
+                )
+                profile.id = str(row["id"])
+                profile.created_at = datetime.fromisoformat(
+                    str(row["created_at"]).replace("Z", "+00:00")
+                )
+                profile.updated_at = now
+            else:
+                connection.execute(
+                    """
+                    INSERT INTO chat_profiles (
+                      id, scope, user_id, display_name, preferences_json,
+                      notes, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        profile.id,
+                        profile.scope,
+                        profile.user_id,
+                        profile.display_name,
+                        json.dumps(profile.preferences, ensure_ascii=False),
+                        profile.notes,
+                        isoformat_z(profile.created_at),
+                        isoformat_z(now),
+                    ),
+                )
+                profile.updated_at = now
+            connection.commit()
+        return profile
+
+    def get_chat_profile(self, *, scope: str, user_id: str) -> ChatProfile | None:
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM chat_profiles WHERE scope = ? AND user_id = ?",
+                (scope, user_id),
+            ).fetchone()
+        return self._row_to_chat_profile(row) if row else None
+
+    def upsert_chat_persona(self, persona: ChatPersona) -> ChatPersona:
+        now = utc_now()
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT id, created_at FROM chat_personas WHERE persona_key = ?",
+                (persona.persona_key,),
+            ).fetchone()
+            if row:
+                connection.execute(
+                    """
+                    UPDATE chat_personas
+                    SET label = ?, description = ?, system_prompt = ?, is_builtin = ?,
+                        allow_tools = ?, tone = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        persona.label,
+                        persona.description,
+                        persona.system_prompt,
+                        1 if persona.is_builtin else 0,
+                        1 if persona.allow_tools else 0,
+                        persona.tone,
+                        isoformat_z(now),
+                        row["id"],
+                    ),
+                )
+                persona.id = str(row["id"])
+                persona.created_at = datetime.fromisoformat(
+                    str(row["created_at"]).replace("Z", "+00:00")
+                )
+                persona.updated_at = now
+            else:
+                connection.execute(
+                    """
+                    INSERT INTO chat_personas (
+                      id, persona_key, label, description, system_prompt,
+                      is_builtin, allow_tools, tone, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        persona.id,
+                        persona.persona_key,
+                        persona.label,
+                        persona.description,
+                        persona.system_prompt,
+                        1 if persona.is_builtin else 0,
+                        1 if persona.allow_tools else 0,
+                        persona.tone,
+                        isoformat_z(persona.created_at),
+                        isoformat_z(now),
+                    ),
+                )
+                persona.updated_at = now
+            connection.commit()
+        return persona
+
+    def get_chat_persona(self, persona_id_or_key: str) -> ChatPersona | None:
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM chat_personas WHERE id = ? OR persona_key = ? LIMIT 1",
+                (persona_id_or_key, persona_id_or_key),
+            ).fetchone()
+        return self._row_to_chat_persona(row) if row else None
+
+    def list_chat_personas(self, *, include_custom: bool = True) -> list[ChatPersona]:
+        with self._lock, self._connect() as connection:
+            if include_custom:
+                rows = connection.execute(
+                    "SELECT * FROM chat_personas ORDER BY is_builtin DESC, persona_key ASC"
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT * FROM chat_personas WHERE is_builtin = 1 ORDER BY persona_key ASC"
+                ).fetchall()
+        return [self._row_to_chat_persona(row) for row in rows]
+
+    def delete_chat_persona(self, persona_id_or_key: str) -> bool:
+        with self._lock, self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM chat_personas WHERE (id = ? OR persona_key = ?) AND is_builtin = 0",
+                (persona_id_or_key, persona_id_or_key),
+            )
+            connection.commit()
+            return (cursor.rowcount or 0) > 0
+
+    def upsert_chat_knowledge_item(self, item: ChatKnowledgeItem) -> ChatKnowledgeItem:
+        now = utc_now()
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT id, created_at FROM chat_knowledge_items WHERE id = ?",
+                (item.id,),
+            ).fetchone()
+            if row:
+                connection.execute(
+                    """
+                    UPDATE chat_knowledge_items
+                    SET topic = ?, content = ?, tags_json = ?, priority = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        item.topic,
+                        item.content,
+                        json.dumps(item.tags, ensure_ascii=False),
+                        item.priority,
+                        isoformat_z(now),
+                        row["id"],
+                    ),
+                )
+                item.created_at = datetime.fromisoformat(
+                    str(row["created_at"]).replace("Z", "+00:00")
+                )
+                item.updated_at = now
+            else:
+                connection.execute(
+                    """
+                    INSERT INTO chat_knowledge_items (
+                      id, topic, content, tags_json, priority, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        item.id,
+                        item.topic,
+                        item.content,
+                        json.dumps(item.tags, ensure_ascii=False),
+                        item.priority,
+                        isoformat_z(item.created_at),
+                        isoformat_z(now),
+                    ),
+                )
+                item.updated_at = now
+            connection.commit()
+        return item
+
+    def delete_chat_knowledge_item(self, item_id: str) -> bool:
+        with self._lock, self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM chat_knowledge_items WHERE id = ?",
+                (item_id,),
+            )
+            connection.commit()
+            return (cursor.rowcount or 0) > 0
+
+    def list_chat_knowledge_items(self, *, limit: int = 100) -> list[ChatKnowledgeItem]:
+        capped = max(1, min(limit, 500))
+        with self._lock, self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM chat_knowledge_items
+                ORDER BY priority DESC, datetime(updated_at) DESC
+                LIMIT ?
+                """,
+                (capped,),
+            ).fetchall()
+        return [self._row_to_chat_knowledge_item(row) for row in rows]
+
+    def search_chat_knowledge_items(
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+    ) -> list[ChatKnowledgeItem]:
+        tokens = [token.strip() for token in query.split() if token.strip()]
+        if not tokens:
+            return []
+        clauses: list[str] = []
+        parameters: list[Any] = []
+        for token in tokens[:5]:
+            clauses.append("(topic LIKE ? OR content LIKE ? OR tags_json LIKE ?)")
+            like = f"%{token}%"
+            parameters.extend([like, like, like])
+        statement = (
+            "SELECT * FROM chat_knowledge_items "
+            f"WHERE {' OR '.join(clauses)} "
+            "ORDER BY priority DESC, datetime(updated_at) DESC LIMIT ?"
+        )
+        parameters.append(max(1, min(limit, 20)))
+        with self._lock, self._connect() as connection:
+            rows = connection.execute(statement, tuple(parameters)).fetchall()
+        return [self._row_to_chat_knowledge_item(row) for row in rows]
+
     def get_stats(self) -> dict[str, int]:
         with self._lock, self._connect() as connection:
             def count(query: str) -> int:
@@ -735,6 +1242,11 @@ class SQLiteRepository:
                 "delivery_logs": count("SELECT COUNT(*) FROM delivery_logs"),
                 "delivery_records": count("SELECT COUNT(*) FROM delivery_records"),
                 "platform_events": count("SELECT COUNT(*) FROM platform_events"),
+                "chat_sessions": count("SELECT COUNT(*) FROM chat_sessions"),
+                "chat_messages": count("SELECT COUNT(*) FROM chat_messages"),
+                "chat_personas": count("SELECT COUNT(*) FROM chat_personas"),
+                "chat_profiles": count("SELECT COUNT(*) FROM chat_profiles"),
+                "chat_knowledge_items": count("SELECT COUNT(*) FROM chat_knowledge_items"),
             }
 
     def _connect(self) -> sqlite3.Connection:
@@ -863,6 +1375,119 @@ class SQLiteRepository:
             delivery_status=row["delivery_status"],
             published_at=datetime.fromisoformat(str(row["published_at"]).replace("Z", "+00:00")),
             created_at=datetime.fromisoformat(str(row["created_at"]).replace("Z", "+00:00")),
+        )
+
+    @staticmethod
+    def _parse_datetime(value: Any) -> datetime | None:
+        if not value:
+            return None
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+
+    @staticmethod
+    def _row_to_chat_session(row: sqlite3.Row) -> ChatSession:
+        custom_persona_raw = row["custom_persona_json"] if "custom_persona_json" in row.keys() else None
+        custom_persona_data = None
+        if custom_persona_raw:
+            try:
+                data = json.loads(custom_persona_raw)
+            except json.JSONDecodeError:
+                data = None
+            if isinstance(data, dict):
+                from .models import CustomPersonaPayload
+
+                custom_persona_data = CustomPersonaPayload.model_validate(data)
+        return ChatSession(
+            id=str(row["id"]),
+            session_key=str(row["session_key"]),
+            origin=str(row["origin"]),
+            scope=str(row["scope"]),
+            group_id=row["group_id"],
+            user_id=row["user_id"],
+            persona_id=row["persona_id"],
+            custom_persona=custom_persona_data,
+            summary=str(row["summary"] or ""),
+            summary_updated_at=SQLiteRepository._parse_datetime(row["summary_updated_at"]),
+            last_message_at=SQLiteRepository._parse_datetime(row["last_message_at"]),
+            created_at=SQLiteRepository._parse_datetime(row["created_at"]) or utc_now(),
+            updated_at=SQLiteRepository._parse_datetime(row["updated_at"]) or utc_now(),
+        )
+
+    @staticmethod
+    def _row_to_chat_message(row: sqlite3.Row) -> ChatMessageRecord:
+        tool_calls_raw = row["tool_calls_json"] if "tool_calls_json" in row.keys() else None
+        tool_calls: list[dict[str, Any]] | None = None
+        if tool_calls_raw:
+            try:
+                parsed = json.loads(tool_calls_raw)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, list):
+                tool_calls = parsed
+        return ChatMessageRecord(
+            id=str(row["id"]),
+            session_id=str(row["session_id"]),
+            role=str(row["role"]),
+            content=str(row["content"] or ""),
+            name=row["name"],
+            tool_call_id=row["tool_call_id"],
+            tool_calls=tool_calls,
+            created_at=SQLiteRepository._parse_datetime(row["created_at"]) or utc_now(),
+        )
+
+    @staticmethod
+    def _row_to_chat_profile(row: sqlite3.Row) -> ChatProfile:
+        preferences: dict[str, Any] = {}
+        raw_prefs = row["preferences_json"] if "preferences_json" in row.keys() else "{}"
+        try:
+            parsed = json.loads(raw_prefs or "{}")
+        except json.JSONDecodeError:
+            parsed = {}
+        if isinstance(parsed, dict):
+            preferences = parsed
+        return ChatProfile(
+            id=str(row["id"]),
+            scope=str(row["scope"]),
+            user_id=str(row["user_id"]),
+            display_name=row["display_name"],
+            preferences=preferences,
+            notes=str(row["notes"] or ""),
+            created_at=SQLiteRepository._parse_datetime(row["created_at"]) or utc_now(),
+            updated_at=SQLiteRepository._parse_datetime(row["updated_at"]) or utc_now(),
+        )
+
+    @staticmethod
+    def _row_to_chat_persona(row: sqlite3.Row) -> ChatPersona:
+        return ChatPersona(
+            id=str(row["id"]),
+            persona_key=str(row["persona_key"]),
+            label=str(row["label"]),
+            description=str(row["description"] or ""),
+            system_prompt=str(row["system_prompt"]),
+            is_builtin=bool(row["is_builtin"]),
+            allow_tools=bool(row["allow_tools"]),
+            tone=row["tone"],
+            created_at=SQLiteRepository._parse_datetime(row["created_at"]) or utc_now(),
+            updated_at=SQLiteRepository._parse_datetime(row["updated_at"]) or utc_now(),
+        )
+
+    @staticmethod
+    def _row_to_chat_knowledge_item(row: sqlite3.Row) -> ChatKnowledgeItem:
+        tags: list[str] = []
+        raw_tags = row["tags_json"] if "tags_json" in row.keys() else "[]"
+        try:
+            parsed = json.loads(raw_tags or "[]")
+        except json.JSONDecodeError:
+            parsed = []
+        if isinstance(parsed, list):
+            tags = [str(item) for item in parsed if isinstance(item, (str, int, float))]
+        return ChatKnowledgeItem(
+            id=str(row["id"]),
+            topic=str(row["topic"]),
+            content=str(row["content"]),
+            tags=tags,
+            priority=int(row["priority"] or 0),
+            created_at=SQLiteRepository._parse_datetime(row["created_at"]) or utc_now(),
+            updated_at=SQLiteRepository._parse_datetime(row["updated_at"]) or utc_now(),
         )
 
     @staticmethod

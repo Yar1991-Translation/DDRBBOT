@@ -52,6 +52,10 @@ def _settings(tmp_path: Path, *, enabled: bool = True) -> Settings:
         rsshub_host_markers=frozenset({"rsshub"}),
         rsshub_extra_hosts=frozenset({"localhost"}),
         qq_image_fail_text_fallback_enabled=True,
+        llm_agent_shell_enabled=False,
+        llm_agent_shell_timeout_seconds=30.0,
+        llm_agent_shell_output_limit=20000,
+        llm_agent_shell_workdir=None,
     )
 
 

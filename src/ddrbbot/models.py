@@ -184,10 +184,110 @@ class QQInboundEvent(BaseModel):
     raw_payload: dict[str, Any] = Field(default_factory=dict)
 
 
+class CustomPersonaPayload(BaseModel):
+    label: str = ""
+    description: str = ""
+    system_prompt: str
+    tone: str | None = None
+    allow_tools: bool = True
+
+
 class AIChatRequest(BaseModel):
     message: str
     origin: str = "api"
     extras: dict[str, Any] = Field(default_factory=dict)
+    session_id: str | None = None
+    persona_id: str | None = None
+    custom_persona: CustomPersonaPayload | None = None
+    history_limit: int | None = None
+    include_knowledge: bool = True
+    reset_session: bool = False
+
+
+class ChatSession(BaseModel):
+    id: str = Field(default_factory=new_id)
+    session_key: str
+    origin: str
+    scope: str
+    group_id: str | None = None
+    user_id: str | None = None
+    persona_id: str | None = None
+    custom_persona: CustomPersonaPayload | None = None
+    summary: str = ""
+    summary_updated_at: datetime | None = None
+    last_message_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class ChatMessageRecord(BaseModel):
+    id: str = Field(default_factory=new_id)
+    session_id: str
+    role: Literal["system", "user", "assistant", "tool"]
+    content: str = ""
+    name: str | None = None
+    tool_call_id: str | None = None
+    tool_calls: list[dict[str, Any]] | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class ChatProfile(BaseModel):
+    id: str = Field(default_factory=new_id)
+    scope: str
+    user_id: str
+    display_name: str | None = None
+    preferences: dict[str, Any] = Field(default_factory=dict)
+    notes: str = ""
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class ChatPersona(BaseModel):
+    id: str = Field(default_factory=new_id)
+    persona_key: str
+    label: str
+    description: str = ""
+    system_prompt: str
+    is_builtin: bool = False
+    allow_tools: bool = True
+    tone: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class ChatKnowledgeItem(BaseModel):
+    id: str = Field(default_factory=new_id)
+    topic: str
+    content: str
+    tags: list[str] = Field(default_factory=list)
+    priority: int = 0
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class PersonaUpsertRequest(BaseModel):
+    persona_key: str
+    label: str
+    description: str = ""
+    system_prompt: str
+    allow_tools: bool = True
+    tone: str | None = None
+
+
+class KnowledgeUpsertRequest(BaseModel):
+    topic: str
+    content: str
+    tags: list[str] = Field(default_factory=list)
+    priority: int = 0
+    id: str | None = None
+
+
+class ProfileUpsertRequest(BaseModel):
+    scope: str = "qq_private"
+    user_id: str
+    display_name: str | None = None
+    preferences: dict[str, Any] = Field(default_factory=dict)
+    notes: str = ""
 
 
 class RenderPreviewRequest(BaseModel):

@@ -7,7 +7,7 @@ from .config import Settings
 from .database import SQLiteRepository
 from .delivery import QQDeliveryService
 from .delivery_worker import DeliveryWorker
-from .llm_agent import AgentScheduler, LLMAgent
+from .llm_agent import AgentScheduler, ChatService, LLMAgent, PersonaStore
 from .pipeline import PipelineCoordinator
 from .qq.commands import QQCommandRouter
 from .qq.napcat import BotAdapter
@@ -31,3 +31,5 @@ class AppServices:
     ws_client: NapCatWSClient
     llm_agent: LLMAgent
     agent_scheduler: AgentScheduler
+    persona_store: PersonaStore
+    chat_service: ChatService
