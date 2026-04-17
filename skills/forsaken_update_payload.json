@@ -1,0 +1,25 @@
+{
+  "title": "Roblox FORSAKEN 近期更新速览",
+  "summary": "根据 Roblox 作品页与 FORSAKEN Wiki 更新日志整理，FORSAKEN 在 2026 年春季连续推出了 Patch 4.1.0「April Fools」与 Patch 4.1.1「Easter(kinda)」。这一轮内容重点集中在限时皮肤、活动经验加成、节日大厅变化与一批皮肤重做。",
+  "highlights": [
+    "Patch 4.1.0「April Fools」开启了 2x EXP 活动，并加入 John Dough John Doe、c0llabk1dd c00lkidd、1Eggs 1x1x1x1、Insane Streamer Slasher 等一批限时整活皮肤",
+    "4.1.0 同时把大厅替换为愚人节主题，并开放前往 Swapsaken 的特殊入口，强化了活动版本的整活氛围",
+    "紧接着的 Patch 4.1.1「Easter(kinda)」继续追加 Spring TwoTime、Easter Ripper Slasher、Poached John Doe、Mercurial Elliot、Egghead Builderman、Yolker 007n7、Easter Noob 等限时内容",
+    "4.1.1 还补充了成就奖励 Mystic Slasher，并集中更新了多款旧皮肤的模型、渲染或表现，说明这轮更新不只是活动换皮，也包含资源回炉",
+    "这些条目来自社区维护的 FORSAKEN Wiki 更新日志，属于社区整理信息；官方归属则可由 Roblox 作品页确认开发者为 Forsaken Dev Team"
+  ],
+  "category": "patch",
+  "theme": "dark",
+  "preset_key": "forsaken",
+  "game": "FORSAKEN",
+  "source_name": "FORSAKEN Wiki",
+  "channel_name": "updates",
+  "author": "Forsaken Dev Team / 社区整理",
+  "source_credibility": "community",
+  "need_translation": false,
+  "discovered_sources": [
+    "https://www.roblox.com/games/18687417158/Forsaken",
+    "https://forsaken2024.fandom.com/wiki/Update_Log",
+    "https://forsaken2024.fandom.com/wiki/FORSAKEN"
+  ]
+}

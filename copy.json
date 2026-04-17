@@ -1,0 +1,515 @@
+{
+  "presets": {
+    "roblox": {
+      "label": "Roblox",
+      "description": "复刻旧版 Roblox 官网风格。适用于平台公告、社区动态与综合快讯。"
+    },
+    "doors": {
+      "label": "DOORS",
+      "description": "深色高压迫感风格。适用于预告、实体异动及版本前瞻。"
+    },
+    "pressure": {
+      "label": "Pressure",
+      "description": "冷色工业风。适用于维护说明、设施动态与系统更新。"
+    },
+    "forsaken": {
+      "label": "Forsaken",
+      "description": "沿用 DOORS 同款卡片外壳（深色粗描边、圆角块与游戏字体栈），适用于 Forsaken 情报、版本节点与社群公告。"
+    }
+  },
+  "preset_availability": {
+    "available_keys": [
+      "roblox",
+      "doors",
+      "forsaken"
+    ],
+    "fallback_key": "roblox",
+    "unavailable_suffix": "（尚未开发）"
+  },
+  "llm_agent": {
+    "disabled": "LLM Agent 未启用。请设置 LLM_AGENT_ENABLED=true 并配置 LLM_BASE_URL/LLM_MODEL。",
+    "run_failed": "LLM Agent 调用失败，请稍后再试。",
+    "tool_steps_exceeded": "（已达到工具调用上限，终止循环。）",
+    "empty_prompt": "请输入要让 AI 处理的内容。",
+    "chat_system_prompt": "你是 DDRBBOT 的 QQ 助手。你可以用工具查询来源、审核队列、事件详情，必要时用 fetch_url 抓网页，用 render_card_for_review 生成资讯卡进入审核队列。最终必须通过 send_reply_text 工具向当前会话发送一条回复；不要在一次对话里多次发送。发群卡必须经人工 /review 批准，禁止尝试其他发送路径。",
+    "api_system_prompt": "你是 DDRBBOT 的调试 Agent。你可以调用可用工具完成查询、采集、生成审核卡等动作。当前没有 QQ 会话上下文，不要调用 send_reply_text。所有群卡仍需人工审核批准。返回一段中文总结作为最终文本。",
+    "scheduler_system_prompt": "你是 DDRBBOT 的后台巡查助手。本轮可做的事：\n1. list_sources 查看已注册来源；\n2. 如需要用 collect_rss / collect_rsshub 拉最新条目；\n3. 如果发现有价值的新消息，用 render_card_for_review 生成一张卡片落入审核队列。\n不要调用 send_reply_text（无会话上下文）。",
+    "scheduler_user_prompt": "请执行一轮巡查。若无新信息，直接回复简短总结即可。"
+  },
+  "rendering": {
+    "unknown_source": "未知来源",
+    "unknown_author": "未知",
+    "preview_source": "预览来源",
+    "raw_event_missing": "原始事件丢失。",
+    "fallback_review_highlights":[
+      "暂无重点摘要。"
+    ],
+    "not_rendered_yet": "无渲染结果",
+    "no_screenshot_yet": "无截图结果",
+    "no_delivery_records": "无投递记录。",
+    "category_labels": {
+      "maintenance": "通知内容",
+      "patch": "更新内容",
+      "teaser": "预告内容",
+      "announcement": "公告内容"
+    },
+    "credibility_labels": {
+      "official": "官方来源",
+      "community": "社区来源",
+      "unverified": "待核实"
+    },
+    "render_status_labels": {
+      "pending": "待渲染",
+      "html_ready": "HTML 就绪",
+      "image_ready": "图片就绪",
+      "failed": "渲染失败",
+      "skipped": "已跳过"
+    }
+  },
+  "models": {
+    "discord_source_name": "Discord",
+    "preview_author": "Preview Operator"
+  },
+  "news_card": {
+    "highlights_title": "内容要点",
+    "content_section_titles": {
+      "announcement": "公告内容",
+      "teaser": "预告内容",
+      "patch": "更新内容",
+      "maintenance": "通知内容"
+    },
+    "translation_badge": "含翻译",
+    "media_suffix": "媒体",
+    "sources_label": "线索来源:",
+    "media_gallery_title": "图像资料",
+    "reference_materials_title": "参考资料",
+    "reference_link_label": "参考链接",
+    "reference_material_index": "参考资料 #{index}",
+    "reference_description_fallback": "图像资料",
+    "reference_section_split_after": 2,
+    "meta_labels": {
+      "author": "发布身份",
+      "source_name": "来源账号",
+      "source_credibility": "来源判定",
+      "channel_name": "频道位置",
+      "media": "媒体数量",
+      "translation": "翻译状态"
+    },
+    "short_category_labels": {
+      "announcement": "公告内容",
+      "teaser": "预告内容",
+      "patch": "更新内容",
+      "maintenance": "通知内容"
+    },
+    "credibility_prefixes": {
+      "official": "官方",
+      "community": "社区",
+      "unverified": "待核实"
+    },
+    "context_templates": {
+      "source_only": "{credibility_prefix}{category_label}，来自 {source_display}。",
+      "with_sources": "{credibility_prefix}{category_label}，来自 {source_display}，补充线索：{sources}。"
+    },
+    "preset_context_templates": {
+      "roblox": {
+        "source_only": "{credibility_prefix}{category_label} · Roblox 频道 {channel_display}（来源 {source_display}）。",
+        "with_sources": "{credibility_prefix}{category_label} · Roblox 频道 {channel_display}（来源 {source_display}），线索节点：{sources}。"
+      },
+      "doors": {
+        "source_only": "{credibility_prefix}{category_label}，监听 {source_display} 的门厅广播（发布身份：{author_display}）。",
+        "with_sources": "{credibility_prefix}{category_label}，监听 {source_display} 的门厅广播（发布身份：{author_display}），异常线索：{sources}。"
+      },
+      "pressure": {
+        "source_only": "{credibility_prefix}{category_label}，来自深海设施通告源 {source_display}。",
+        "with_sources": "{credibility_prefix}{category_label}，来自深海设施通告源 {source_display}，交叉信号：{sources}。"
+      },
+      "forsaken": {
+        "source_only": "{credibility_prefix}{category_label}，Forsaken 档案源 {source_display}（频道 {channel_display}）。",
+        "with_sources": "{credibility_prefix}{category_label}，Forsaken 档案源 {source_display}（频道 {channel_display}），追踪条目：{sources}。"
+      }
+    }
+  },
+  "preview_defaults": {
+    "title": "DOORS 发布新预告，未知实体首次出现",
+    "summary": "官方开启下次更新预热。核心线索隐于预告图与账号互动记录中，所有模块均给出 demo 数据用于预览。",
+    "highlights": "新内容持续开发中\n预告图暗藏未知实体轮廓\n门厅走廊出现异常光线\n官方账号多次互动 Wiki 条目\n近期将披露更多情报",
+    "category": "teaser",
+    "theme": "dark",
+    "orientation": "vertical",
+    "preset_key": "doors",
+    "custom_css": "",
+    "game": "DOORS",
+    "source_name": "DOORS 官方账号",
+    "channel_name": "announcements",
+    "author": "LSPLASH",
+    "source_credibility": "official",
+    "hero_image_url": "https://static.wikia.nocookie.net/dh-roblox-doors/images/8/80/DOORS_Cover.png",
+    "hero_image_description": "官方预告主视觉：门厅中首次出现未知实体轮廓。",
+    "hero_image_reference_url": "https://doors.fandom.com/wiki/DOORS",
+    "hero_image_reference_label": "doors.fandom.com",
+    "secondary_media_1_url": "https://static.wikia.nocookie.net/dh-roblox-doors/images/5/56/Rush_Model.png",
+    "secondary_media_1_description": "配图 1：实体 Rush 的造型在预告中被短暂闪过。",
+    "secondary_media_1_reference_url": "https://doors.fandom.com/wiki/Rush",
+    "secondary_media_1_reference_label": "doors.fandom.com/wiki/Rush",
+    "secondary_media_2_url": "https://static.wikia.nocookie.net/dh-roblox-doors/images/3/3f/Ambush_Model.png",
+    "secondary_media_2_description": "配图 2：Ambush 在后续门房内出现，伴随连续回响。",
+    "secondary_media_2_reference_url": "https://doors.fandom.com/wiki/Ambush",
+    "secondary_media_2_reference_label": "doors.fandom.com/wiki/Ambush",
+    "secondary_media_3_url": "https://static.wikia.nocookie.net/dh-roblox-doors/images/c/c7/Screech_Model.png",
+    "secondary_media_3_description": "配图 3：Screech 在黑暗角落出现的提示动画。",
+    "secondary_media_3_reference_url": "https://doors.fandom.com/wiki/Screech",
+    "secondary_media_3_reference_label": "doors.fandom.com/wiki/Screech",
+    "secondary_media_4_url": "https://static.wikia.nocookie.net/dh-roblox-doors/images/6/66/Seek_Model.png",
+    "secondary_media_4_description": "配图 4：Seek 现身走廊尽头，追逐序章即将触发。",
+    "secondary_media_4_reference_url": "https://doors.fandom.com/wiki/Seek",
+    "secondary_media_4_reference_label": "doors.fandom.com/wiki/Seek",
+    "discovered_sources": "@LSPLASH\n@DOORSGame\n@RobloxDevRel\nDOORS Fandom Wiki",
+    "need_translation": "true"
+  },
+  "preview_console": {
+    "page_title": "DDRBBOT 预览工作台",
+    "eyebrow": "卡片预览",
+    "title": "游戏预设工作台",
+    "hero_copy": "调整预设或字段信息，右侧即时生成最终卡片。",
+    "labels": {
+      "preset": "游戏预设",
+      "theme": "主题",
+      "orientation": "版式",
+      "preset_description": "预设说明",
+      "title": "标题",
+      "game": "游戏名",
+      "category": "分类",
+      "credibility": "可信度",
+      "summary": "摘要",
+      "highlights": "重点条目",
+      "source_name": "来源名",
+      "channel_name": "频道名",
+      "author": "作者",
+      "hero_image_url": "主图 URL",
+      "hero_image_description": "主图说明",
+      "hero_image_reference_url": "主图参考链接",
+      "hero_image_reference_label": "主图参考文字",
+      "secondary_media_url": "配图 {index} URL",
+      "secondary_media_description": "配图 {index} 说明",
+      "secondary_media_reference_url": "配图 {index} 参考链接",
+      "secondary_media_reference_label": "配图 {index} 参考文字",
+      "tracked_sources": "线索来源",
+      "custom_css": "自定义 CSS",
+      "need_translation": "显示翻译标记",
+      "update_preview": "刷新预览",
+      "open_new_window": "新窗口打开",
+      "card_preview": "卡片预览"
+    },
+    "supporting": {
+      "highlights": "每行一条。",
+      "sources": "每行一条。",
+      "hero_image": "建议填写图像说明与原始出处，便于图文一体展示。",
+      "secondary_media": "配图可留空；填写 URL 后相应描述与参考信息将一并展示。",
+      "custom_css": "基于当前预设样式进行代码级微调。",
+      "custom_css_hint": "控制代码长度以确保 URL 预览稳定性。",
+      "preset_unavailable": "这个预设尚未开发，当前已临时回退到 Roblox 预设。"
+    },
+    "sections": {
+      "hero_media": "主图",
+      "secondary_media": "配图组（最多 4 张）",
+      "meta": "元信息",
+      "content": "正文内容"
+    },
+    "stage": {
+      "eyebrow": "实时舞台",
+      "title": "卡片预览",
+      "copy": "实时合并预设文案、基础样式与自定义 CSS 渲染预览。"
+    },
+    "options": {
+      "theme": {
+        "light": "浅色",
+        "dark": "深色"
+      },
+      "orientation": {
+        "vertical": "竖向",
+        "horizontal": "横向"
+      },
+      "category": {
+        "announcement": "公告内容",
+        "teaser": "预告内容",
+        "patch": "更新内容",
+        "maintenance": "通知内容"
+      },
+      "credibility": {
+        "official": "官方来源",
+        "community": "社区来源",
+        "unverified": "待核实"
+      }
+    },
+    "hero_image_placeholder": "https://example.com/cover.png",
+    "iframe_title": "卡片预览"
+  },
+  "review_panel": {
+    "page_title": "DDRBBOT 审核台",
+    "queue": {
+      "eyebrow": "审核队列",
+      "title": "审核后台",
+      "copy": "处理待发、失败或需人工修订的卡片。支持人工校对、强制重渲染与手动投递。"
+    },
+    "stats": {
+      "processed": "已处理",
+      "queue": "队列中",
+      "failed": "失败"
+    },
+    "filters": {
+      "aria_label": "状态筛选",
+      "open": "待处理",
+      "failed": "失败",
+      "sent": "已发送",
+      "rejected": "已拒绝",
+      "all": "全部"
+    },
+    "empty": {
+      "eyebrow": "当前为空",
+      "title": "当前筛选下没有可审核内容",
+      "copy": "请通过 Discord webhook、RSS 采集或 QQ 测试卡入口录入内容。"
+    },
+    "selected": {
+      "eyebrow": "当前条目"
+    },
+    "labels": {
+      "title": "标题",
+      "game": "游戏名",
+      "category": "分类",
+      "theme": "主题",
+      "summary": "摘要",
+      "highlights": "重点条目",
+      "target_type": "目标类型",
+      "target_id": "目标 ID",
+      "default_group": "默认群",
+      "group": "群聊",
+      "private": "私聊"
+    },
+    "supporting": {
+      "highlights": "每行一条。",
+      "structured_result": "结构化结果",
+      "structured_meta": "语言 {language} · 可信度 {credibility} · {translation}",
+      "translation_true": "含翻译",
+      "translation_false": "原文可直接使用"
+    },
+    "actions": {
+      "rerender": "保存并重渲染",
+      "approve_send": "批准并发送",
+      "resend": "重发最新图片",
+      "reject": "拦截",
+      "open_preview": "单独打开预览"
+    },
+    "info_blocks": {
+      "raw_message": "原始消息",
+      "raw_payload": "原始载荷快照",
+      "latest_artifact": "最新产物",
+      "recent_deliveries": "最近投递记录"
+    },
+    "preview": {
+      "eyebrow": "实时预览",
+      "title": "当前卡片预览",
+      "copy": "左侧编辑实时生效。发送前请务必执行“保存并重渲染”。",
+      "iframe_title": "审核预览"
+    },
+    "artifact_meta": {
+      "theme": "主题",
+      "html": "HTML",
+      "image": "图片",
+      "not_rendered": "无渲染结果",
+      "no_screenshot": "无截图结果"
+    },
+    "recent_deliveries_empty": "无相关投递记录。",
+    "empty_large": {
+      "eyebrow": "审核队列",
+      "title": "无待审事件",
+      "copy": "流水线生成 processed_event 后将自动加载列表。请先通过 /api/collect/rss、Discord Webhook 或 QQ 测试卡补充数据。"
+    },
+    "delivery_status_labels": {
+      "pending": "待处理",
+      "skipped": "待审核",
+      "review_pending": "待审核",
+      "approved": "已批准",
+      "sent": "已发送",
+      "failed": "发送失败",
+      "rejected": "已拦截"
+    },
+    "js": {
+      "processing": "处理中...",
+      "done": "操作完成。",
+      "failed": "操作失败。",
+      "unknown_failure": "未知异常。操作失败。"
+    }
+  },
+  "review_api": {
+    "rerender_done": "保存并重渲染成功。",
+    "approve_send_done": "已批准并投递至 NapCat。",
+    "reject_done": "已拦截。卡片终止发送。",
+    "resend_done": "已推送最新截图。",
+    "errors": {
+      "processed_not_found": "找不到 processed_event：{processed_event_id}",
+      "raw_not_found": "找不到 raw_event：{raw_event_id}",
+      "preview_image_missing": "HTML 生成完毕。缺失可供 NapCat 投递的截图产物。",
+      "manual_resend_missing": "缺失可供重发的截图产物。"
+    }
+  },
+  "qq_commands": {
+    "authorizer": {
+      "group_denied": "群聊未授权。",
+      "user_denied": "用户未授权。",
+      "command_unavailable": "命令不可用。"
+    },
+    "shared": {
+      "napcat_label": "NapCat",
+      "queue_label": "队列",
+      "online": "在线",
+      "offline": "离线",
+      "unknown": "未知"
+    },
+    "ping": {
+      "title": "PONG"
+    },
+    "status": {
+      "title": "DDRBBOT 状态",
+      "bot_label": "机器人",
+      "version_label": "版本",
+      "groups_label": "群数量",
+      "totals_label": "原始 / 已处理 / 已渲染 / 已投递",
+      "delivery_records_label": "投递记录",
+      "failed_deliveries_label": "失败投递",
+      "qq_events_label": "QQ 事件",
+      "admin_auth_label": "管理员鉴权",
+      "auth_open": "开放模式",
+      "auth_users": "{count} 个用户",
+      "auth_groups": "{count} 个群"
+    },
+    "review_queue": {
+      "title": "审核队列",
+      "pipeline_pending": "流水线待处理",
+      "failed_deliveries": "失败投递",
+      "recent_failed_none": "最近失败：无",
+      "recent_failed_title": "最近失败：",
+      "recent_failed_item": "- {trace_id}[{target_type}:{target_id}] attempts={attempts} error={error}"
+    },
+    "retry_failed": {
+      "failed": "重试失败：{message}",
+      "sent": "重试已发出",
+      "trace": "追踪 ID",
+      "route": "路由",
+      "attempts": "尝试次数",
+      "message_id": "消息 ID",
+      "message_id_unknown": "未知"
+    },
+    "push_test": {
+      "unsupported_preset": "不支持的预设：{preset_key}。可用：{supported}",
+      "image_unavailable": "测试卡渲染完毕，缺失 PNG 产物。\nHTML: {html_path}"
+    }
+  },
+  "qq_operations": {
+    "errors": {
+      "unsupported_preset": "不支持的预设：{preset_key}。可用：{supported}",
+      "target_type_invalid": "target_type 仅支持 group 或 private。",
+      "target_pair_required": "必须同时提供 target_type 和 target_id。",
+      "default_target_required": "未配置 DEFAULT_QQ_GROUP_ID。请显式传入 target_type 和 target_id。"
+    },
+    "push_test_caption": "{game} / 测试卡",
+    "test_fixtures": {
+      "doors": {
+        "title": "DOORS 测试卡：新预告信号出现",
+        "summary": "验证 DOORS 预设在 NapCat 投递链路的渲染表现。",
+        "highlights":[
+          "命令触发渲染正常",
+          "DOORS 默认风格套用成功",
+          "NapCat 会话回传正常"
+        ],
+        "category": "teaser",
+        "game": "DOORS",
+        "source_name": "DOORS Official",
+        "channel_name": "announcements",
+        "author": "Official",
+        "source_credibility": "official",
+        "discovered_sources": [
+          "@LSPLASH",
+          "@DOORSGame"
+        ]
+      },
+      "pressure": {
+        "title": "Pressure 测试卡：维护公告预览",
+        "summary": "验证 Pressure 预设的截图生成与 QQ 投递表现。",
+        "highlights":[
+          "Pressure 样式全局覆盖正常",
+          "NapCat 通信链路验证通过",
+          "图片回传当前会话成功"
+        ],
+        "category": "maintenance",
+        "game": "Pressure",
+        "source_name": "Pressure Newswire",
+        "channel_name": "system-updates",
+        "author": "System",
+        "source_credibility": "official",
+        "discovered_sources": [
+          "@PressureRoblox"
+        ]
+      },
+      "roblox": {
+        "title": "Roblox 测试卡：公告投递演练",
+        "summary": "验证当前 NapCat 环境下的 Roblox 通用公告模板。",
+        "highlights":[
+          "模板排版及文本可读性正常",
+          "核心信息模块输出稳定",
+          "QQ 命令回执链路畅通"
+        ],
+        "category": "announcement",
+        "game": "Roblox",
+        "source_name": "Roblox News",
+        "channel_name": "platform",
+        "author": "Roblox Staff",
+        "source_credibility": "official",
+        "discovered_sources": [
+          "@Roblox"
+        ]
+      },
+      "forsaken": {
+        "title": "Forsaken 测试卡：暗色情报版式演练",
+        "summary": "验证 Forsaken 预设与 QQ 命令链路的协同调度。",
+        "highlights":[
+          "Forsaken 预设接入渲染器成功",
+          "测试卡片回传会话成功",
+          "留存复用测试命令路径"
+        ],
+        "category": "announcement",
+        "game": "Forsaken",
+        "source_name": "Forsaken Dispatch",
+        "channel_name": "intel-feed",
+        "author": "Operations",
+        "source_credibility": "community",
+        "discovered_sources": [
+          "@ForsakenIntel"
+        ]
+      }
+    }
+  },
+  "delivery": {
+    "default_caption_prefix": "Roblox 资讯",
+    "pipeline_caption": "{prefix} · {title}",
+    "review_caption": "{prefix} / {title}",
+    "retry_exhausted": "重试耗尽。投递终止。",
+    "generic_failed": "投递失败。",
+    "no_failed_record": "未找到失败投递记录。",
+    "record_not_failed": "该记录当前并非失败状态。",
+    "missing_image_path": "存档请求缺失 image_path。",
+    "image_not_found": "图片文件不存在：{image_path}",
+    "image_too_large": "图片文件超限：{image_path}（{size_bytes} bytes > {limit_bytes} bytes）",
+    "image_fail_text_fallback_note": "（图片未发出）以下为摘要；可打开卡片 HTML 查看排版。"
+  },
+  "napcat": {
+    "action_failed": "NapCat 动作失败。"
+  },
+  "analyzer": {
+    "system_prompt": "你负责解析 Roblox 资讯。将输入转换为 JSON。必须包含以下字段：\ntitle, summary, highlights, category, game, need_translation, source_credibility, media, discovered_sources, language\n其中 media 为数组；每项尽量提供 type, url, description, reference_url, reference_label。\n严格规则：\n- 仅输出合法 JSON。\n- 严禁使用 Markdown。\n- highlights 限制为 3-5 条。\n- media 最多返回 4 项。\n- 如果当前模型运行环境支持联网检索，可搜索与公告强相关的图片链接，优先官方或一手来源，并补充 description 与 reference_url；拿不准就留空。\n- 杜绝编造，信息不足时留空。",
+    "fallback_title": "未命名 Roblox 资讯",
+    "fallback_summary": "正文解析失败。请查阅原始事件。",
+    "fallback_highlights":[
+      "暂无提取信息"
+    ]
+  }
+}

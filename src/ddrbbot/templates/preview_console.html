@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ copy.preview_console.page_title }}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+    <script type="importmap">
+      {
+        "imports": {
+          "@material/web/": "https://esm.run/@material/web/"
+        }
+      }
+    </script>
+    <script type="module">
+      import '@material/web/all.js';
+      import {styles as typescaleStyles} from '@material/web/typography/md-typescale-styles.js';
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, typescaleStyles.styleSheet];
+    </script>
+    <style>{{ css | safe }}</style>
+  </head>
+  <body>
+    <main class="console-shell">
+      <aside class="editor-pane tonal-surface">
+        <div class="hero-block">
+          <p class="eyebrow">{{ copy.preview_console.eyebrow }}</p>
+          <h1>{{ copy.preview_console.title }}</h1>
+          <p class="hero-copy">{{ copy.preview_console.hero_copy }}</p>
+        </div>
+
+        <form id="preview-form" class="editor-form">
+          <div class="field-grid">
+            <div class="field">
+              <md-outlined-select
+                label="{{ copy.preview_console.labels.preset }}"
+                name="preset_key"
+                value="{{ defaults.preset_key }}"
+              >
+                {% for preset in presets %}
+                <md-select-option value="{{ preset.key }}" {% if defaults.preset_key == preset.key %}selected{% endif %}>
+                  <div slot="headline">{{ preset.label }}</div>
+                </md-select-option>
+                {% endfor %}
+              </md-outlined-select>
+            </div>
+
+            <div class="field">
+              <md-outlined-select
+                label="{{ copy.preview_console.labels.theme }}"
+                name="theme"
+                value="{{ defaults.theme }}"
+              >
+                <md-select-option value="light" {% if defaults.theme == "light" %}selected{% endif %}>
+                  <div slot="headline">{{ copy.preview_console.options.theme.light }}</div>
+                </md-select-option>
+                <md-select-option value="dark" {% if defaults.theme == "dark" %}selected{% endif %}>
+                  <div slot="headline">{{ copy.preview_console.options.theme.dark }}</div>
+                </md-select-option>
+              </md-outlined-select>
+            </div>
+
+            <div class="field">
+              <md-outlined-select
+                label="{{ copy.preview_console.labels.orientation }}"
+                name="orientation"
+                value="{{ defaults.orientation }}"
+              >
+                <md-select-option value="vertical" {% if defaults.orientation == "vertical" %}selected{% endif %}>
+                  <div slot="headline">{{ copy.preview_console.options.orientation.vertical }}</div>
+                </md-select-option>
+                <md-select-option value="horizontal" {% if defaults.orientation == "horizontal" %}selected{% endif %}>
+                  <div slot="headline">{{ copy.preview_console.options.orientation.horizontal }}</div>
+                </md-select-option>
+              </md-outlined-select>
+            </div>
+          </div>
+
+          <section class="preset-panel">
+            <p class="preset-panel-label">{{ copy.preview_console.labels.preset_description }}</p>
+            <p class="preset-panel-title" id="preset-panel-title"></p>
+            <p class="preset-panel-copy" id="preset-panel-copy"></p>
+          </section>
+
+          <div class="field-grid">
+            <div class="field">
+              <md-outlined-text-field
+                label="{{ copy.preview_console.labels.title }}"
+                name="title"
+                maxlength="80"
+                value="{{ defaults.title }}"
+              ></md-outlined-text-field>
+            </div>
+
+            <div class="field">
+              <md-outlined-text-field
+                label="{{ copy.preview_console.labels.game }}"
+                name="game"
+                value="{{ defaults.game }}"
+              ></md-outlined-text-field>
+            </div>
+          </div>
+
+          <div class="field-grid">
+            <div class="field">
+              <md-outlined-select
+                label="{{ copy.preview_console.labels.category }}"
+                name="category"
+                value="{{ defaults.category }}"
+              >
+                <md-select-option value="announcement" {% if defaults.category == "announcement" %}selected{% endif %}>
+                  <div slot="headline">{{ copy.preview_console.options.category.announcement }}</div>
+                </md-select-option>
+                <md-select-option value="teaser" {% if defaults.category == "teaser" %}selected{% endif %}>
+                  <div slot="headline">{{ copy.preview_console.options.category.teaser }}</div>
+                </md-select-option>
+                <md-select-option value="patch" {% if defaults.category == "patch" %}selected{% endif %}>
+                  <div slot="headline">{{ copy.preview_console.options.category.patch }}</div>
+                </md-select-option>
+                <md-select-option value="maintenance" {% if defaults.category == "maintenance" %}selected{% endif %}>
+                  <div slot="headline">{{ copy.preview_console.options.category.maintenance }}</div>
+                </md-select-option>
+              </md-outlined-select>
+            </div>
+
+            <div class="field">
+              <md-outlined-select
+                label="{{ copy.preview_console.labels.credibility }}"
+                name="source_credibility"
+                value="{{ defaults.source_credibility }}"
+              >
+                <md-select-option value="official" {% if defaults.source_credibility == "official" %}selected{% endif %}>
+                  <div slot="headline">{{ copy.preview_console.options.credibility.official }}</div>
+                </md-select-option>
+                <md-select-option value="community" {% if defaults.source_credibility == "community" %}selected{% endif %}>
+                  <div slot="headline">{{ copy.preview_console.options.credibility.community }}</div>
+                </md-select-option>
+                <md-select-option value="unverified" {% if defaults.source_credibility == "unverified" %}selected{% endif %}>
+                  <div slot="headline">{{ copy.preview_console.options.credibility.unverified }}</div>
+                </md-select-option>
+              </md-outlined-select>
+            </div>
+          </div>
+
+          <div class="field">
+            <md-outlined-text-field
+              type="textarea"
+              rows="4"
+              label="{{ copy.preview_console.labels.summary }}"
+              name="summary"
+              value="{{ defaults.summary }}"
+            ></md-outlined-text-field>
+          </div>
+
+          <div class="field">
+            <md-outlined-text-field
+              type="textarea"
+              rows="6"
+              label="{{ copy.preview_console.labels.highlights }}"
+              name="highlights"
+              supporting-text="{{ copy.preview_console.supporting.highlights }}"
+              value="{{ defaults.highlights }}"
+            ></md-outlined-text-field>
+            <small>{{ copy.preview_console.supporting.highlights }}</small>
+          </div>
+
+          <div class="field-grid">
+            <div class="field">
+              <md-outlined-text-field
+                label="{{ copy.preview_console.labels.source_name }}"
+                name="source_name"
+                value="{{ defaults.source_name }}"
+              ></md-outlined-text-field>
+            </div>
+
+            <div class="field">
+              <md-outlined-text-field
+                label="{{ copy.preview_console.labels.channel_name }}"
+                name="channel_name"
+                value="{{ defaults.channel_name }}"
+              ></md-outlined-text-field>
+            </div>
+          </div>
+
+          <div class="field-grid">
+            <div class="field">
+              <md-outlined-text-field
+                label="{{ copy.preview_console.labels.author }}"
+                name="author"
+                value="{{ defaults.author }}"
+              ></md-outlined-text-field>
+            </div>
+
+            <div class="field">
+              <md-outlined-text-field
+                label="{{ copy.preview_console.labels.hero_image_url }}"
+                name="hero_image_url"
+                placeholder="{{ copy.preview_console.hero_image_placeholder }}"
+                value="{{ defaults.hero_image_url }}"
+              ></md-outlined-text-field>
+              <small>{{ copy.preview_console.supporting.hero_image }}</small>
+            </div>
+          </div>
+
+          <div class="field-grid">
+            <div class="field">
+              <md-outlined-text-field
+                label="{{ copy.preview_console.labels.hero_image_description }}"
+                name="hero_image_description"
+                value="{{ defaults.hero_image_description }}"
+              ></md-outlined-text-field>
+            </div>
+
+            <div class="field">
+              <md-outlined-text-field
+                label="{{ copy.preview_console.labels.hero_image_reference_url }}"
+                name="hero_image_reference_url"
+                value="{{ defaults.hero_image_reference_url }}"
+              ></md-outlined-text-field>
+            </div>
+          </div>
+
+          <div class="field">
+            <md-outlined-text-field
+              label="{{ copy.preview_console.labels.hero_image_reference_label }}"
+              name="hero_image_reference_label"
+              value="{{ defaults.hero_image_reference_label }}"
+            ></md-outlined-text-field>
+          </div>
+
+          <section class="secondary-media-section">
+            <p class="section-label">{{ copy.preview_console.sections.secondary_media }}</p>
+            <p class="section-hint"><small>{{ copy.preview_console.supporting.secondary_media }}</small></p>
+            <div class="secondary-media-grid">
+            {% for index in range(1, 5) %}
+            <div class="secondary-media-group">
+              <div class="field-grid">
+                <div class="field">
+                  <md-outlined-text-field
+                    label="{{ copy.preview_console.labels.secondary_media_url | replace('{index}', index|string) }}"
+                    name="secondary_media_{{ index }}_url"
+                    value="{{ defaults['secondary_media_' ~ index ~ '_url'] }}"
+                  ></md-outlined-text-field>
+                </div>
+                <div class="field">
+                  <md-outlined-text-field
+                    label="{{ copy.preview_console.labels.secondary_media_description | replace('{index}', index|string) }}"
+                    name="secondary_media_{{ index }}_description"
+                    value="{{ defaults['secondary_media_' ~ index ~ '_description'] }}"
+                  ></md-outlined-text-field>
+                </div>
+              </div>
+              <div class="field-grid">
+                <div class="field">
+                  <md-outlined-text-field
+                    label="{{ copy.preview_console.labels.secondary_media_reference_url | replace('{index}', index|string) }}"
+                    name="secondary_media_{{ index }}_reference_url"
+                    value="{{ defaults['secondary_media_' ~ index ~ '_reference_url'] }}"
+                  ></md-outlined-text-field>
+                </div>
+                <div class="field">
+                  <md-outlined-text-field
+                    label="{{ copy.preview_console.labels.secondary_media_reference_label | replace('{index}', index|string) }}"
+                    name="secondary_media_{{ index }}_reference_label"
+                    value="{{ defaults['secondary_media_' ~ index ~ '_reference_label'] }}"
+                  ></md-outlined-text-field>
+                </div>
+              </div>
+            </div>
+            {% endfor %}
+            </div>
+          </section>
+
+          <div class="field">
+            <md-outlined-text-field
+              type="textarea"
+              rows="4"
+              label="{{ copy.preview_console.labels.tracked_sources }}"
+              name="discovered_sources"
+              supporting-text="{{ copy.preview_console.supporting.sources }}"
+              value="{{ defaults.discovered_sources }}"
+            ></md-outlined-text-field>
+            <small>{{ copy.preview_console.supporting.sources }}</small>
+          </div>
+
+          <div class="field">
+            <md-outlined-text-field
+              type="textarea"
+              rows="8"
+              label="{{ copy.preview_console.labels.custom_css }}"
+              name="custom_css"
+              supporting-text="{{ copy.preview_console.supporting.custom_css }}"
+              value="{{ defaults.custom_css }}"
+            ></md-outlined-text-field>
+            <small>{{ copy.preview_console.supporting.custom_css_hint }}</small>
+          </div>
+
+          <label class="checkbox-field">
+            <md-checkbox
+              name="need_translation"
+              touch-target="wrapper"
+              {% if defaults.need_translation == "true" %}checked{% endif %}
+            ></md-checkbox>
+            <span>{{ copy.preview_console.labels.need_translation }}</span>
+          </label>
+
+          <div class="action-row">
+            <md-filled-button type="submit">{{ copy.preview_console.labels.update_preview }}</md-filled-button>
+            <md-outlined-button id="open-preview-link" href="{{ card_url }}" target="_blank">{{ copy.preview_console.labels.open_new_window }}</md-outlined-button>
+          </div>
+        </form>
+      </aside>
+
+      <section class="stage-pane tonal-surface-strong">
+        <div class="stage-header">
+          <div>
+            <p class="eyebrow">{{ copy.preview_console.stage.eyebrow }}</p>
+            <h2>{{ copy.preview_console.stage.title }}</h2>
+          </div>
+          <p class="stage-copy">{{ copy.preview_console.stage.copy }}</p>
+        </div>
+        <iframe
+          id="preview-frame"
+          name="preview-frame"
+          title="{{ copy.preview_console.iframe_title }}"
+          class="preview-frame"
+          src="{{ card_url }}"
+        ></iframe>
+      </section>
+    </main>
+
+    <script>
+      const presetMap = {{ preset_map_json | safe }};
+      const form = document.getElementById("preview-form");
+      const frame = document.getElementById("preview-frame");
+      const openLink = document.getElementById("open-preview-link");
+      const endpoint = "/preview/md3/card";
+      const presetField = form.querySelector('[name="preset_key"]');
+      const gameField = form.querySelector('[name="game"]');
+      const customCssField = form.querySelector('[name="custom_css"]');
+      const presetTitle = document.getElementById("preset-panel-title");
+      const presetCopy = document.getElementById("preset-panel-copy");
+      let lastPresetKey = presetField.value;
+
+      function getPreset(key) {
+        return presetMap[key] || presetMap.roblox;
+      }
+
+      function syncPresetPanel() {
+        const preset = getPreset(presetField.value);
+        presetTitle.textContent = preset.label;
+        presetCopy.textContent = preset.description;
+        const previousPreset = getPreset(lastPresetKey);
+        if (!gameField.value || gameField.value === previousPreset.label) {
+          gameField.value = preset.label;
+        }
+        if (!customCssField.value || customCssField.value === (previousPreset.default_custom_css || "")) {
+          customCssField.value = preset.default_custom_css || "";
+        }
+        lastPresetKey = preset.key;
+      }
+
+      function getControlValue(control) {
+        if (control.tagName === "MD-CHECKBOX") {
+          return control.checked ? "true" : "false";
+        }
+        return control.value ?? "";
+      }
+
+      function buildUrl() {
+        const params = new URLSearchParams();
+        const controls = form.querySelectorAll("[name]");
+        for (const control of controls) {
+          const key = control.getAttribute("name");
+          const value = getControlValue(control);
+          if (value !== "") {
+            params.set(key, value);
+          }
+        }
+        return `${endpoint}?${params.toString()}`;
+      }
+
+      function refreshPreview() {
+        const url = buildUrl();
+        frame.src = url;
+        openLink.href = url;
+      }
+
+      let previewTimer = null;
+
+      function scheduleRefresh() {
+        window.clearTimeout(previewTimer);
+        previewTimer = window.setTimeout(refreshPreview, 180);
+      }
+
+      presetField.addEventListener("change", () => {
+        syncPresetPanel();
+        scheduleRefresh();
+      });
+
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        refreshPreview();
+      });
+
+      form.addEventListener("input", scheduleRefresh);
+      form.addEventListener("change", scheduleRefresh);
+
+      syncPresetPanel();
+      refreshPreview();
+    </script>
+  </body>
+</html>

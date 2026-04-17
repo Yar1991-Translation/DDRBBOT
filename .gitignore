@@ -1,0 +1,116 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+.eggs/
+dist/
+build/
+pip-wheel-metadata/
+wheels/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Test / coverage
+.pytest_cache/
+.mypy_cache/
+.dmypy.json
+.pytype/
+.pyre/
+.ruff_cache/
+.hypothesis/
+.benchmarks/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+coverage.json
+*.cover
+*.lcov
+junit.xml
+.tox/
+nox/
+cython_debug/
+__marimo__/
+__pypackages__/
+
+# Env & secrets（保留 .env.example）
+.env
+.env.*
+!.env.example
+
+# Runtime data（与 README / config 默认一致）
+artifacts/
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Playwright
+playwright-report/
+test-results/
+blob-report/
+playwright/.cache/
+
+# 临时 / 备份
+tmp/
+temp/
+.cache/
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+*~
+
+# 依赖（若日后加前端）
+node_modules/
+
+# direnv
+.envrc
+.direnv/
+
+# 私钥与本地凭证目录
+*.pem
+*.p12
+*.pfx
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+id_ecdsa
+id_ecdsa.pub
+secrets/
+
+# Cursor / MCP 本地配置（若放在仓库根目录）
+mcps/
+.agent/
+
+# Logs
+*.log
+logs/
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Cursor（本地规则体量大时可不传仓库）
+.cursor/
+
+# Jupyter
+.ipynb_checkpoints/

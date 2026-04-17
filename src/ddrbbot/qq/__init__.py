@@ -1,0 +1,2 @@
+"""QQ adapter implementations."""
+

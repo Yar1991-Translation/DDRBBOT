@@ -1,0 +1,49 @@
+{
+  "title": "DOORS 游戏速览",
+  "summary": "DOORS 是 LSPLASH 在 Roblox 上推出的多人合作 roguelite 恐怖游戏。玩家需要穿过一连串不断变化的房间，搜集资源、应对机关，并在 Rush、Seek、Figure 等实体的追击下寻找下一扇门。",
+  "highlights": [
+    "DOORS 以连续开门推进为核心节奏，每局地图与资源分布都会变化，兼具背板、反应与临场判断",
+    "游戏拥有多个标志性实体与追逐战设计，像 Rush、Ambush、Seek、Figure 都对应不同的应对方式",
+    "除主楼层外，游戏后续还扩展出 The Rooms、The Backdoor、The Mines、The Outdoors 等分支与新区域",
+    "整体风格把 Roblox 美术与强音效压迫感结合起来，是平台上辨识度很高的合作恐怖作品",
+    "DOORS 由 LSPLASH 团队开发，长期通过大型更新持续加入新楼层、机制、实体与活动内容"
+  ],
+  "category": "announcement",
+  "theme": "dark",
+  "preset_key": "doors",
+  "game": "DOORS",
+  "source_name": "LSPLASH / DOORS Wiki",
+  "channel_name": "overview",
+  "author": "LSPLASH",
+  "source_credibility": "community",
+  "need_translation": false,
+  "media": [
+    {
+      "type": "image",
+      "url": "https://static.wikia.nocookie.net/doors-game/images/1/15/Rush_mode_update_icon_ok_bro.png/revision/latest?cb=20260401163430",
+      "description": "DOORS 当前游戏图标，可作为整张卡片的主视觉来源。",
+      "reference_url": "https://doors-game.fandom.com/wiki/DOORS",
+      "reference_label": "DOORS Wiki - DOORS"
+    },
+    {
+      "type": "image",
+      "url": "https://static.wikia.nocookie.net/doors-game/images/c/c0/Seek2.png/revision/latest?cb=20240730083641",
+      "description": "Seek 的当前形象，是 DOORS 最具代表性的追逐型实体之一。",
+      "reference_url": "https://doors-game.fandom.com/wiki/Seek",
+      "reference_label": "DOORS Wiki - Seek"
+    },
+    {
+      "type": "image",
+      "url": "https://static.wikia.nocookie.net/doors-game/images/5/51/FigureRenderOfficial.png/revision/latest?cb=20231206183643",
+      "description": "Figure 的官方渲染图，代表 DOORS 中经典的听觉追猎型 Boss 设计。",
+      "reference_url": "https://doors-game.fandom.com/wiki/Figure",
+      "reference_label": "DOORS Wiki - Figure"
+    }
+  ],
+  "discovered_sources": [
+    "https://www.roblox.com/games/6516141723/DOORS",
+    "https://doors-game.fandom.com/wiki/DOORS",
+    "https://doors-game.fandom.com/wiki/Seek",
+    "https://doors-game.fandom.com/wiki/Figure"
+  ]
+}

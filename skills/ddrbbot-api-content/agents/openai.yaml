@@ -1,0 +1,7 @@
+interface:
+  display_name: "DDRBBOT API 内容编排"
+  short_description: "驱动本地 DDRBBOT API 生成图文卡片、审核并发送结果"
+  default_prompt: "Use $ddrbbot-api-content to drive the local DDRBBOT API, source relevant image links when needed, and generate or operate a news card workflow."
+
+policy:
+  allow_implicit_invocation: true

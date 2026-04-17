@@ -1,0 +1,318 @@
+:root {
+  color-scheme: light;
+  --md-sys-color-primary: #3950a2;
+  --md-sys-color-on-primary: #ffffff;
+  --md-sys-color-primary-container: #dce1ff;
+  --md-sys-color-on-primary-container: #00174d;
+  --md-sys-color-surface: #faf8ff;
+  --md-sys-color-surface-container: #ffffff;
+  --md-sys-color-surface-container-high: #f3f1f9;
+  --md-sys-color-on-surface: #1a1c22;
+  --md-sys-color-on-surface-variant: #454754;
+  --md-sys-color-outline: #767786;
+  --md-sys-color-outline-variant: #d1d3dd;
+  --md-sys-color-secondary-container: #e1e6f9;
+  --md-shape-large: 28px;
+  --md-shape-medium: 20px;
+  --md-shape-small: 14px;
+  --shadow-1: 0 10px 30px rgba(38, 52, 95, 0.08);
+  --shadow-2: 0 18px 40px rgba(26, 38, 72, 0.14);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: "Roboto", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  background:
+    radial-gradient(circle at top left, rgba(57, 80, 162, 0.14), transparent 32%),
+    radial-gradient(circle at bottom right, rgba(167, 117, 255, 0.12), transparent 24%),
+    linear-gradient(180deg, #f5f2ff 0%, #eef3ff 100%);
+  color: var(--md-sys-color-on-surface);
+}
+
+.console-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(360px, 1.15fr) minmax(0, 1fr);
+  gap: 24px;
+  padding: 24px;
+}
+
+.tonal-surface,
+.tonal-surface-strong {
+  border-radius: var(--md-shape-large);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  overflow: hidden;
+}
+
+.tonal-surface {
+  background: color-mix(in srgb, var(--md-sys-color-surface) 92%, var(--md-sys-color-primary) 8%);
+  box-shadow: var(--shadow-1);
+}
+
+.tonal-surface-strong {
+  background: color-mix(in srgb, var(--md-sys-color-surface) 88%, var(--md-sys-color-primary-container) 12%);
+  box-shadow: var(--shadow-2);
+}
+
+.editor-pane,
+.stage-pane {
+  padding: 24px;
+}
+
+.editor-pane {
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.hero-block {
+  margin-bottom: 24px;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: var(--md-sys-color-primary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hero-block h1,
+.stage-header h2 {
+  margin: 0;
+  font-size: 2rem;
+  line-height: 1.15;
+}
+
+.hero-copy,
+.stage-copy,
+.field small {
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.hero-copy {
+  margin: 12px 0 0;
+  line-height: 1.65;
+}
+
+.preset-panel {
+  padding: 16px 18px;
+  border-radius: var(--md-shape-medium);
+  background: color-mix(in srgb, var(--md-sys-color-secondary-container) 68%, white 32%);
+}
+
+.preset-panel-label,
+.preset-panel-title,
+.preset-panel-copy {
+  margin: 0;
+}
+
+.preset-panel-label {
+  color: var(--md-sys-color-primary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.preset-panel-title {
+  margin-top: 8px;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.preset-panel-copy {
+  margin-top: 6px;
+  color: var(--md-sys-color-on-surface-variant);
+  line-height: 1.6;
+}
+
+.editor-form {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  align-items: start;
+}
+
+.editor-form > * {
+  grid-column: 1 / -1;
+}
+
+.editor-form > .field,
+.editor-form > .checkbox-field {
+  grid-column: auto;
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+}
+
+.field md-outlined-text-field,
+.field md-outlined-select {
+  width: 100%;
+}
+
+.field md-outlined-text-field,
+.field md-outlined-select {
+  --md-outlined-text-field-container-shape: 18px;
+  --md-outlined-select-text-field-container-shape: 18px;
+  --md-outlined-text-field-input-text-font: "Roboto", "Noto Sans SC", sans-serif;
+  --md-outlined-select-text-field-input-text-font: "Roboto", "Noto Sans SC", sans-serif;
+}
+
+.field md-outlined-text-field {
+  --md-outlined-text-field-supporting-text-color: var(--md-sys-color-on-surface-variant);
+  --md-outlined-text-field-focus-outline-color: var(--md-sys-color-primary);
+  --md-outlined-text-field-hover-outline-color: var(--md-sys-color-on-surface);
+}
+
+.field md-outlined-select {
+  --md-outlined-select-text-field-outline-color: var(--md-sys-color-outline);
+  --md-outlined-select-text-field-focus-outline-color: var(--md-sys-color-primary);
+}
+
+.secondary-media-section {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border-radius: var(--md-shape-medium);
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-high) 72%, white 28%);
+  border: 1px solid var(--md-sys-color-outline-variant);
+}
+
+.secondary-media-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  align-items: start;
+}
+
+.section-label {
+  margin: 0;
+  color: var(--md-sys-color-primary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.section-hint {
+  margin: -6px 0 0;
+}
+
+.secondary-media-group {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px 14px;
+  border-radius: var(--md-shape-small);
+  background: color-mix(in srgb, var(--md-sys-color-surface) 90%, var(--md-sys-color-primary) 10%);
+  border: 1px dashed var(--md-sys-color-outline-variant);
+}
+
+.secondary-media-group .field-grid {
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.checkbox-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.checkbox-field span {
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.checkbox-field md-checkbox {
+  flex: 0 0 auto;
+}
+
+.action-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.action-row md-filled-button,
+.action-row md-outlined-button {
+  min-width: 128px;
+  --md-filled-button-container-shape: 9999px;
+  --md-outlined-button-container-shape: 9999px;
+}
+
+.stage-pane {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 18px;
+}
+
+.stage-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 16px;
+}
+
+.stage-copy {
+  max-width: 280px;
+  margin: 0;
+  text-align: right;
+}
+
+.preview-frame {
+  width: 100%;
+  min-height: 70vh;
+  border: 0;
+  border-radius: 20px;
+  background: transparent;
+}
+
+@media (max-width: 839px) {
+  .console-shell {
+    grid-template-columns: 1fr;
+    padding: 16px;
+  }
+
+  .editor-pane {
+    max-height: none;
+    overflow-y: visible;
+  }
+
+  .field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .stage-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .stage-copy {
+    max-width: none;
+    text-align: left;
+  }
+
+  .preview-frame {
+    min-height: 60vh;
+  }
+}

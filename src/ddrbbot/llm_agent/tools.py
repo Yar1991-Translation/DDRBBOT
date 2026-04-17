@@ -1,0 +1,714 @@
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import dataclass
+from typing import Any, Awaitable, Callable
+
+import httpx
+
+from ..config import Settings
+from ..database import SQLiteRepository
+from ..models import (
+    MediaAsset,
+    ProcessedEvent,
+    RawEvent,
+    RenderPreviewRequest,
+    RSSHubCollectRequest,
+)
+from ..rendering import NewsCardRenderer
+from ..rss import RSSCollector
+from ..rsshub import validate_rsshub_feed_url
+from ..utils import make_external_id, utc_now
+from .agent import AgentContext
+
+logger = logging.getLogger(__name__)
+
+ToolHandler = Callable[[AgentContext, dict[str, Any]], Awaitable[dict[str, Any]]]
+
+
+@dataclass
+class ToolSpec:
+    name: str
+    description: str
+    parameters: dict[str, Any]
+    handler: ToolHandler
+
+    def to_openai(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": self.parameters,
+            },
+        }
+
+
+class ToolRegistry:
+    def __init__(self) -> None:
+        self._tools: dict[str, ToolSpec] = {}
+
+    def register(self, spec: ToolSpec) -> None:
+        self._tools[spec.name] = spec
+
+    def get(self, name: str) -> ToolHandler | None:
+        spec = self._tools.get(name)
+        return spec.handler if spec else None
+
+    def openai_tool_specs(self) -> list[dict[str, Any]]:
+        return [spec.to_openai() for spec in self._tools.values()]
+
+    def names(self) -> list[str]:
+        return list(self._tools.keys())
+
+
+def build_default_registry(
+    *,
+    settings: Settings,
+    repository: SQLiteRepository,
+    renderer: NewsCardRenderer,
+    pipeline: Any = None,
+    bot_adapter: Any = None,
+    bot_adapter_sender: Callable[[str, str], Awaitable[str]] | None = None,
+    pipeline_enqueue: Callable[[str], Awaitable[None]] | None = None,
+) -> ToolRegistry:
+    """Build the default tool set.
+
+    Prefer passing the live `pipeline` and `bot_adapter` service instances.
+    `bot_adapter_sender` / `pipeline_enqueue` callables are supported for tests.
+    """
+    if pipeline_enqueue is None and pipeline is not None:
+        pipeline_enqueue = pipeline.enqueue
+    if bot_adapter_sender is None and bot_adapter is not None:
+        bot_adapter_sender = bot_adapter.send_text
+    if pipeline_enqueue is None or bot_adapter_sender is None:
+        raise ValueError(
+            "build_default_registry requires pipeline and bot_adapter (or explicit senders)."
+        )
+
+    registry = ToolRegistry()
+
+    registry.register(
+        ToolSpec(
+            name="list_sources",
+            description="List registered source feeds from the DDRBBOT repository.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50}
+                },
+                "additionalProperties": False,
+            },
+            handler=_tool_list_sources(repository),
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="list_review_items",
+            description=(
+                "List processed events in the review queue. "
+                "status: open | failed | sent | rejected | all."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "enum": ["open", "failed", "sent", "rejected", "all"],
+                        "default": "open",
+                    },
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10},
+                },
+                "additionalProperties": False,
+            },
+            handler=_tool_list_review_items(repository),
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="get_processed_event",
+            description="Fetch a single processed event (title/summary/highlights/media).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "processed_event_id": {"type": "string"},
+                },
+                "required": ["processed_event_id"],
+                "additionalProperties": False,
+            },
+            handler=_tool_get_processed_event(repository),
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="fetch_url",
+            description=(
+                "HTTP GET a public URL and return up to max_bytes of the decoded text body. "
+                "Use this to skim an article or API before summarizing."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "Full http(s) URL"},
+                    "max_bytes": {
+                        "type": "integer",
+                        "minimum": 1024,
+                        "maximum": 200000,
+                        "default": 65536,
+                    },
+                    "timeout_seconds": {
+                        "type": "number",
+                        "minimum": 1,
+                        "maximum": 60,
+                        "default": 15,
+                    },
+                },
+                "required": ["url"],
+                "additionalProperties": False,
+            },
+            handler=_tool_fetch_url,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="collect_rss",
+            description=(
+                "Pull a generic RSS/Atom feed, insert new raw events and enqueue them "
+                "for the analyzer pipeline."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "source_name": {"type": "string"},
+                    "feed_url": {"type": "string"},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 5},
+                },
+                "required": ["source_name", "feed_url"],
+                "additionalProperties": False,
+            },
+            handler=_tool_collect_rss(repository, pipeline_enqueue, rsshub=False, settings=settings),
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="collect_rsshub",
+            description=(
+                "Pull an RSSHub feed (host must match RSSHUB_HOST_MARKERS / RSSHUB_EXTRA_HOSTS). "
+                "Used for X / other social sources exposed via RSSHub."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "source_name": {"type": "string"},
+                    "feed_url": {"type": "string"},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 5},
+                },
+                "required": ["source_name", "feed_url"],
+                "additionalProperties": False,
+            },
+            handler=_tool_collect_rss(repository, pipeline_enqueue, rsshub=True, settings=settings),
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="register_source",
+            description="Upsert a source entry in the sources registry.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "source_type": {"type": "string", "default": "rss"},
+                    "name": {"type": "string"},
+                    "feed_url": {"type": "string"},
+                    "credibility_level": {
+                        "type": "string",
+                        "enum": ["official", "community", "unverified"],
+                        "default": "unverified",
+                    },
+                },
+                "required": ["name"],
+                "additionalProperties": False,
+            },
+            handler=_tool_register_source(repository),
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="render_card_for_review",
+            description=(
+                "Render a news card and place it into the review queue "
+                "(delivery_status=review_pending). Returns processed_event_id, html_path "
+                "and image_path. The card will NOT be sent automatically."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "summary": {"type": "string"},
+                    "highlights": {"type": "array", "items": {"type": "string"}},
+                    "category": {
+                        "type": "string",
+                        "enum": ["announcement", "teaser", "patch", "maintenance"],
+                        "default": "announcement",
+                    },
+                    "game": {"type": "string"},
+                    "preset_key": {
+                        "type": "string",
+                        "enum": ["roblox", "doors", "forsaken", "pressure"],
+                        "default": "roblox",
+                    },
+                    "orientation": {
+                        "type": "string",
+                        "enum": ["vertical", "horizontal"],
+                        "default": "vertical",
+                    },
+                    "theme": {"type": "string", "enum": ["light", "dark"], "default": "light"},
+                    "source_name": {"type": "string"},
+                    "channel_name": {"type": "string"},
+                    "author": {"type": "string"},
+                    "source_credibility": {
+                        "type": "string",
+                        "enum": ["official", "community", "unverified"],
+                        "default": "unverified",
+                    },
+                    "need_translation": {"type": "boolean", "default": False},
+                    "media": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "url": {"type": "string"},
+                                "description": {"type": "string"},
+                                "reference_url": {"type": "string"},
+                                "reference_label": {"type": "string"},
+                            },
+                            "required": ["url"],
+                            "additionalProperties": True,
+                        },
+                    },
+                    "discovered_sources": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["title", "summary", "highlights"],
+                "additionalProperties": False,
+            },
+            handler=_tool_render_card_for_review(repository, renderer),
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="call_ddrbbot_api",
+            description=(
+                "Call any DDRBBOT HTTP API endpoint on the local service. "
+                "Use for endpoints not exposed as a dedicated tool "
+                "(review actions, dead-letter, delivery retry, preview PNG, etc.). "
+                "method is GET or POST; path starts with /api/... ."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "method": {"type": "string", "enum": ["GET", "POST"], "default": "GET"},
+                    "path": {
+                        "type": "string",
+                        "description": "Path starting with /api/, e.g. /api/review/items",
+                    },
+                    "query": {
+                        "type": "object",
+                        "description": "Optional query params (string values only).",
+                        "additionalProperties": {"type": "string"},
+                    },
+                    "payload": {
+                        "type": "object",
+                        "description": "Optional JSON body for POST.",
+                    },
+                    "base_url": {
+                        "type": "string",
+                        "description": "Override base URL; defaults to http://127.0.0.1:8000.",
+                    },
+                },
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+            handler=_tool_call_ddrbbot_api(settings),
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="send_reply_text",
+            description=(
+                "Send a short plain-text reply back to the current QQ chat (private or the group "
+                "where the bot was mentioned). Not allowed outside qq_chat origin."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "maxLength": 2000},
+                },
+                "required": ["text"],
+                "additionalProperties": False,
+            },
+            handler=_tool_send_reply_text(bot_adapter_sender),
+        )
+    )
+    return registry
+
+
+# ---------- handler implementations ----------
+
+
+def _tool_list_sources(repository: SQLiteRepository) -> ToolHandler:
+    async def handler(context: AgentContext, arguments: dict[str, Any]) -> dict[str, Any]:
+        limit = int(arguments.get("limit") or 50)
+        rows = repository.list_sources(limit=max(1, min(limit, 200)))
+        return {
+            "ok": True,
+            "data": [dict(r) if not isinstance(r, dict) else r for r in rows],
+        }
+
+    return handler
+
+
+def _tool_list_review_items(repository: SQLiteRepository) -> ToolHandler:
+    status_map = {
+        "open": ("pending", "skipped", "review_pending", "failed", "approved", "queued"),
+        "failed": ("failed",),
+        "sent": ("sent",),
+        "rejected": ("rejected",),
+        "all": None,
+    }
+
+    async def handler(context: AgentContext, arguments: dict[str, Any]) -> dict[str, Any]:
+        status = str(arguments.get("status") or "open")
+        limit = int(arguments.get("limit") or 10)
+        statuses = status_map.get(status, status_map["open"])
+        items = repository.list_processed_events(
+            delivery_statuses=statuses,
+            limit=max(1, min(limit, 50)),
+        )
+        return {
+            "ok": True,
+            "data": [
+                {
+                    "id": it.id,
+                    "title": it.title,
+                    "game": it.game,
+                    "category": it.category,
+                    "delivery_status": it.delivery_status,
+                    "render_status": it.render_status,
+                    "published_at": it.published_at.isoformat(),
+                }
+                for it in items
+            ],
+        }
+
+    return handler
+
+
+def _tool_get_processed_event(repository: SQLiteRepository) -> ToolHandler:
+    async def handler(context: AgentContext, arguments: dict[str, Any]) -> dict[str, Any]:
+        pid = str(arguments.get("processed_event_id") or "").strip()
+        if not pid:
+            return {"ok": False, "error": "processed_event_id is required"}
+        item = repository.get_processed_event(pid)
+        if item is None:
+            return {"ok": False, "error": "not_found"}
+        return {
+            "ok": True,
+            "data": {
+                "id": item.id,
+                "title": item.title,
+                "summary": item.summary,
+                "highlights": item.highlights,
+                "category": item.category,
+                "game": item.game,
+                "source_credibility": item.source_credibility,
+                "delivery_status": item.delivery_status,
+                "render_status": item.render_status,
+                "media": [m.model_dump() for m in item.media],
+                "discovered_sources": item.discovered_sources,
+                "published_at": item.published_at.isoformat(),
+            },
+        }
+
+    return handler
+
+
+async def _tool_fetch_url(context: AgentContext, arguments: dict[str, Any]) -> dict[str, Any]:
+    url = str(arguments.get("url") or "").strip()
+    if not url.startswith(("http://", "https://")):
+        return {"ok": False, "error": "url must be http(s)"}
+    max_bytes = int(arguments.get("max_bytes") or 65536)
+    timeout = float(arguments.get("timeout_seconds") or 15)
+    try:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            response = await client.get(url)
+    except Exception as exc:  # pragma: no cover - network dependent
+        return {"ok": False, "error": f"fetch_failed: {exc}"}
+    text = response.text[: max(1024, min(max_bytes, 200000))]
+    return {
+        "ok": True,
+        "data": {
+            "status_code": response.status_code,
+            "content_type": response.headers.get("content-type"),
+            "text": text,
+            "truncated": len(response.text) > len(text),
+        },
+    }
+
+
+def _tool_collect_rss(
+    repository: SQLiteRepository,
+    pipeline_enqueue: Callable[[str], Awaitable[None]],
+    *,
+    rsshub: bool,
+    settings: Settings,
+) -> ToolHandler:
+    async def handler(context: AgentContext, arguments: dict[str, Any]) -> dict[str, Any]:
+        source_name = str(arguments.get("source_name") or "").strip()
+        feed_url = str(arguments.get("feed_url") or "").strip()
+        limit = int(arguments.get("limit") or 5)
+        if not source_name or not feed_url:
+            return {"ok": False, "error": "source_name and feed_url required"}
+        if rsshub:
+            try:
+                validate_rsshub_feed_url(
+                    feed_url,
+                    host_markers=settings.rsshub_host_markers,
+                    extra_hosts=settings.rsshub_extra_hosts,
+                )
+            except ValueError as exc:
+                return {"ok": False, "error": f"rsshub_invalid: {exc}"}
+        try:
+            events = await RSSCollector().collect(source_name, feed_url, limit=max(1, min(limit, 20)))
+        except Exception as exc:
+            return {"ok": False, "error": f"collect_failed: {exc}"}
+        accepted: list[str] = []
+        deduplicated = 0
+        for event in events:
+            if rsshub:
+                base = dict(event.raw_payload) if event.raw_payload else {}
+                event.raw_payload = {**base, "collector": "rsshub", "feed_url": feed_url}
+            inserted = repository.insert_raw_event(event)
+            if not inserted:
+                deduplicated += 1
+                continue
+            accepted.append(event.id)
+            await pipeline_enqueue(event.id)
+        repository.touch_source_feed(
+            source_type="rss",
+            source_name=source_name,
+            feed_url=feed_url,
+        )
+        return {
+            "ok": True,
+            "data": {
+                "accepted": len(accepted),
+                "deduplicated": deduplicated,
+                "queued_event_ids": accepted,
+            },
+        }
+
+    return handler
+
+
+def _tool_register_source(repository: SQLiteRepository) -> ToolHandler:
+    async def handler(context: AgentContext, arguments: dict[str, Any]) -> dict[str, Any]:
+        name = str(arguments.get("name") or "").strip()
+        if not name:
+            return {"ok": False, "error": "name required"}
+        source = repository.upsert_source_registration(
+            source_type=str(arguments.get("source_type") or "rss").strip(),
+            name=name,
+            feed_url=(str(arguments.get("feed_url") or "").strip() or None),
+            credibility_level=str(arguments.get("credibility_level") or "unverified"),
+        )
+        return {"ok": True, "data": source if isinstance(source, dict) else dict(source)}
+
+    return handler
+
+
+def _tool_render_card_for_review(
+    repository: SQLiteRepository,
+    renderer: NewsCardRenderer,
+) -> ToolHandler:
+    async def handler(context: AgentContext, arguments: dict[str, Any]) -> dict[str, Any]:
+        try:
+            preview = RenderPreviewRequest(
+                title=str(arguments.get("title") or "").strip() or "Untitled",
+                summary=str(arguments.get("summary") or "").strip(),
+                highlights=[
+                    str(x).strip()
+                    for x in (arguments.get("highlights") or [])
+                    if str(x).strip()
+                ],
+                category=str(arguments.get("category") or "announcement"),
+                theme=str(arguments.get("theme") or "light"),
+                preset_key=(str(arguments.get("preset_key") or "").strip() or None),
+                orientation=str(arguments.get("orientation") or "vertical"),
+                game=(str(arguments.get("game") or "").strip() or None),
+                source_name=str(arguments.get("source_name") or "AgentDraft"),
+                channel_name=(str(arguments.get("channel_name") or "").strip() or None),
+                author=(str(arguments.get("author") or "").strip() or None),
+                source_credibility=str(arguments.get("source_credibility") or "unverified"),
+                need_translation=bool(arguments.get("need_translation") or False),
+                media=[
+                    MediaAsset.model_validate(m)
+                    for m in (arguments.get("media") or [])
+                    if isinstance(m, dict)
+                ],
+                discovered_sources=[
+                    str(x).strip()
+                    for x in (arguments.get("discovered_sources") or [])
+                    if str(x).strip()
+                ],
+            )
+        except Exception as exc:
+            return {"ok": False, "error": f"invalid_payload: {exc}"}
+
+        now = utc_now()
+        raw_event = RawEvent(
+            source_type="llm_agent",
+            source_name=preview.source_name,
+            channel_name=preview.channel_name,
+            author=preview.author,
+            content="\n".join([preview.title, preview.summary, *preview.highlights]),
+            attachments=[m.url for m in preview.media],
+            external_id=make_external_id(
+                "llm-agent-card",
+                preview.source_name,
+                preview.title,
+                now.isoformat(),
+            ),
+            published_at=preview.published_at or now,
+            raw_payload=preview.model_dump(mode="json"),
+        )
+        if not repository.insert_raw_event(raw_event):
+            existing = repository.get_raw_event(raw_event.id)
+            if existing is not None:
+                raw_event = existing
+        processed_event = ProcessedEvent(
+            raw_event_id=raw_event.id,
+            title=preview.title,
+            summary=preview.summary,
+            highlights=preview.highlights,
+            category=preview.category,
+            game=preview.game,
+            need_translation=preview.need_translation,
+            source_credibility=preview.source_credibility,
+            media=preview.media,
+            discovered_sources=preview.discovered_sources,
+            language="zh",
+            render_status="pending",
+            delivery_status="review_pending",
+            published_at=preview.published_at or now,
+        )
+        repository.upsert_processed_event(processed_event)
+        try:
+            artifact = await renderer.render(raw_event, processed_event, theme=preview.theme)
+        except Exception as exc:
+            repository.update_processed_event_status(processed_event.id, render_status="failed")
+            return {"ok": False, "error": f"render_failed: {exc}"}
+        repository.save_render_artifact(artifact)
+        repository.update_processed_event_status(
+            processed_event.id,
+            render_status="image_ready" if artifact.image_path else "html_ready",
+            delivery_status="review_pending",
+        )
+        return {
+            "ok": True,
+            "data": {
+                "processed_event_id": processed_event.id,
+                "raw_event_id": raw_event.id,
+                "html_path": artifact.html_path,
+                "image_path": artifact.image_path,
+                "review_url": f"/review?processed_event_id={processed_event.id}",
+            },
+        }
+
+    return handler
+
+
+_ALLOWED_API_PREFIXES = (
+    "/api/health",
+    "/api/render/preview",
+    "/api/render/preview-image",
+    "/api/review/",
+    "/api/review",
+    "/api/collect/",
+    "/api/sources",
+    "/api/qq/delivery/review-queue",
+    "/api/qq/adapter/status",
+    "/api/delivery/dead-letter",
+    "/api/webhook/discord",
+    "/api/ai/chat",
+)
+
+
+def _tool_call_ddrbbot_api(settings: Settings) -> ToolHandler:
+    async def handler(context: AgentContext, arguments: dict[str, Any]) -> dict[str, Any]:
+        path = str(arguments.get("path") or "").strip()
+        method = str(arguments.get("method") or "GET").upper()
+        if method not in {"GET", "POST"}:
+            return {"ok": False, "error": "method must be GET or POST"}
+        if not path.startswith("/"):
+            return {"ok": False, "error": "path must start with /"}
+        if not any(path == prefix or path.startswith(prefix) for prefix in _ALLOWED_API_PREFIXES):
+            return {"ok": False, "error": f"path not on allowlist: {path}"}
+        # Never let the agent enqueue QQ deliveries by itself.
+        if path.startswith("/api/qq/send-news-card") or path.startswith("/api/qq/delivery/retry-failed"):
+            return {"ok": False, "error": "direct QQ delivery is not permitted for the agent"}
+        base_url = str(arguments.get("base_url") or "http://127.0.0.1:8000").rstrip("/")
+        query_raw = arguments.get("query") or {}
+        payload = arguments.get("payload")
+        params = {str(k): str(v) for k, v in query_raw.items()} if isinstance(query_raw, dict) else None
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                if method == "GET":
+                    response = await client.get(base_url + path, params=params)
+                else:
+                    response = await client.post(base_url + path, params=params, json=payload or {})
+        except Exception as exc:
+            return {"ok": False, "error": f"call_failed: {exc}"}
+        body_text = response.text[:60000]
+        try:
+            body: Any = response.json()
+        except Exception:
+            body = body_text
+        return {
+            "ok": 200 <= response.status_code < 300,
+            "data": {
+                "status_code": response.status_code,
+                "body": body,
+            },
+        }
+
+    return handler
+
+
+def _tool_send_reply_text(
+    sender: Callable[[str, str], Awaitable[str]],
+) -> ToolHandler:
+    async def handler(context: AgentContext, arguments: dict[str, Any]) -> dict[str, Any]:
+        if not context.can_send_reply:
+            return {
+                "ok": False,
+                "error": "send_reply_text is only available inside an active qq_chat context",
+            }
+        text = str(arguments.get("text") or "").strip()
+        if not text:
+            return {"ok": False, "error": "text is empty"}
+        route = f"{context.reply_target_type}:{context.reply_target_id}"
+        try:
+            message_id = await sender(route, text[:2000])
+        except Exception as exc:  # pragma: no cover - network dependent
+            return {"ok": False, "error": f"send_failed: {exc}"}
+        return {"ok": True, "data": {"route": route, "message_id": message_id}}
+
+    return handler
+
+
+build_default_tool_registry = build_default_registry
+
+
+# noinspection PyUnusedLocal
+def _unused(x: Any = json) -> None:
+    """Keep json import when the module is statically analyzed without callers."""

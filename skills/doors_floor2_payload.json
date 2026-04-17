@@ -1,0 +1,48 @@
+{
+  "title": "DOORS Floor 2: The Mines 重大更新",
+  "summary": "DOORS 迎来期待已久的第二层 \"The Mines\" 更新，玩家将从酒店深入地下矿井，面对全新实体、机制和 Boss 战，探索 Door 101 至 Door 200 的未知恐惧。",
+  "highlights": [
+    "全新楼层 The Mines：从 Door 101 延伸至 Door 200，矿井环境取代酒店走廊，包含矿车轨道、洪水房间、电气室等多种场景",
+    "五大新实体登场：Grumble（矿井蜘蛛群）、Queen Grumble（Door 150 Boss 战）、Shadow（暗影追踪者）、Snare（陷阱实体）、Haste（加速门限时挑战）",
+    "经典实体回归并进化：Seek 追逐战在矿洞中展开全新路线，Figure 在矿井图书馆再次登场，Rush/Ambush 继续在黑暗中出没",
+    "全新道具与商店系统：Jeff 的矿井商店提供矿灯、面包等新物品，星光瓶和荧光棒成为照明关键",
+    "矿车逃亡序列：玩家需乘坐矿车穿越危险隧道，躲避障碍物并在关键时刻做出选择"
+  ],
+  "category": "announcement",
+  "theme": "dark",
+  "preset_key": "doors",
+  "game": "DOORS",
+  "source_name": "DOORS Wiki",
+  "channel_name": "announcements",
+  "author": "LSPLASH Studios",
+  "source_credibility": "official",
+  "need_translation": false,
+  "media": [
+    {
+      "type": "image",
+      "url": "https://static.wikia.nocookie.net/doors-game/images/f/ff/A_room_in_the_mines.PNG/revision/latest?cb=20240902144749",
+      "description": "The Mines 矿井房间截图，展示了矿井走廊的黑暗氛围和木质支撑结构。",
+      "reference_url": "https://doors-game.fandom.com/wiki/The_Mines",
+      "reference_label": "DOORS Wiki"
+    },
+    {
+      "type": "image",
+      "url": "https://static.wikia.nocookie.net/doors-game/images/b/bf/GFRender.png/revision/latest?cb=20241228005221",
+      "description": "Grumble/Queen Grumble 渲染图，Floor 2 的标志性新 Boss 实体。",
+      "reference_url": "https://doors-game.fandom.com/wiki/Grumble",
+      "reference_label": "DOORS Wiki"
+    },
+    {
+      "type": "image",
+      "url": "https://static.wikia.nocookie.net/doors-game/images/9/95/FiredampRoom.jpg/revision/latest?cb=20240901214043",
+      "description": "矿井瓦斯房间，充满危险气体的特殊区域。",
+      "reference_url": "https://doors-game.fandom.com/wiki/The_Mines",
+      "reference_label": "DOORS Wiki"
+    }
+  ],
+  "discovered_sources": [
+    "@LSPLASH",
+    "DOORS Wiki",
+    "DOORS Fandom"
+  ]
+}

@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ copy.review_panel.page_title }}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+    <script type="importmap">
+      {
+        "imports": {
+          "@material/web/": "https://esm.run/@material/web/"
+        }
+      }
+    </script>
+    <script type="module">
+      import "@material/web/all.js";
+      import {styles as typescaleStyles} from "@material/web/typography/md-typescale-styles.js";
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, typescaleStyles.styleSheet];
+    </script>
+    <style>{{ css | safe }}</style>
+  </head>
+  <body>
+    <main class="review-shell">
+      <aside class="queue-pane tonal-surface">
+        <div class="pane-header">
+          <p class="eyebrow">{{ copy.review_panel.queue.eyebrow }}</p>
+          <h1>{{ copy.review_panel.queue.title }}</h1>
+          <p class="pane-copy">{{ copy.review_panel.queue.copy }}</p>
+        </div>
+
+        <section class="stats-grid">
+          <div class="stat-card">
+            <span class="stat-label">{{ copy.review_panel.stats.processed }}</span>
+            <strong>{{ total_processed_events }}</strong>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">{{ copy.review_panel.stats.queue }}</span>
+            <strong>{{ queue_size }}</strong>
+          </div>
+          <div class="stat-card stat-card--warn">
+            <span class="stat-label">{{ copy.review_panel.stats.failed }}</span>
+            <strong>{{ failed_deliveries }}</strong>
+          </div>
+        </section>
+
+        <nav class="filter-row" aria-label="{{ copy.review_panel.filters.aria_label }}">
+          <a class="filter-pill {% if status_filter == 'open' %}is-active{% endif %}" href="/review?status=open">{{ copy.review_panel.filters.open }}</a>
+          <a class="filter-pill {% if status_filter == 'failed' %}is-active{% endif %}" href="/review?status=failed">{{ copy.review_panel.filters.failed }}</a>
+          <a class="filter-pill {% if status_filter == 'sent' %}is-active{% endif %}" href="/review?status=sent">{{ copy.review_panel.filters.sent }}</a>
+          <a class="filter-pill {% if status_filter == 'rejected' %}is-active{% endif %}" href="/review?status=rejected">{{ copy.review_panel.filters.rejected }}</a>
+          <a class="filter-pill {% if status_filter == 'all' %}is-active{% endif %}" href="/review?status=all">{{ copy.review_panel.filters.all }}</a>
+        </nav>
+
+        <div class="queue-list">
+          {% if items %}
+            {% for item in items %}
+            <a class="queue-item {% if item.active %}is-active{% endif %}" href="/review?status={{ status_filter }}&processed_event_id={{ item.id }}">
+              <div class="queue-item-topline">
+                <span class="queue-status queue-status--{{ item.delivery_status_tone }}">{{ item.delivery_status_label }}</span>
+                <span class="queue-time">{{ item.published_at }}</span>
+              </div>
+              <h2>{{ item.title }}</h2>
+              <p>{{ item.source_name }}{% if item.game %} · {{ item.game }}{% endif %}</p>
+              <div class="queue-meta">
+                <span>{{ item.category_label }}</span>
+                <span>{{ item.render_status_label }}</span>
+              </div>
+            </a>
+            {% endfor %}
+          {% else %}
+          <section class="empty-state">
+            <p class="eyebrow">{{ copy.review_panel.empty.eyebrow }}</p>
+            <h2>{{ copy.review_panel.empty.title }}</h2>
+            <p>{{ copy.review_panel.empty.copy }}</p>
+          </section>
+          {% endif %}
+        </div>
+      </aside>
+
+      <section class="detail-pane tonal-surface-strong">
+        {% if selected_item %}
+        <div class="detail-header">
+          <div>
+            <p class="eyebrow">{{ copy.review_panel.selected.eyebrow }}</p>
+            <h2>{{ selected_item.title }}</h2>
+            <p class="detail-copy">{{ selected_item.source_name }}{% if selected_item.channel_name %} · {{ selected_item.channel_name }}{% endif %} · {{ selected_item.published_at }}</p>
+          </div>
+          <div class="header-badges">
+            <span class="queue-status queue-status--{{ selected_item.delivery_status_tone }}">{{ selected_item.delivery_status_label }}</span>
+            <span class="plain-badge">{{ selected_item.render_status_label }}</span>
+          </div>
+        </div>
+
+        <div class="detail-layout">
+          <section class="editor-pane">
+            <form id="review-form" class="editor-form" novalidate>
+              <div class="field-grid">
+                <div class="field">
+                  <md-outlined-text-field
+                    label="{{ copy.review_panel.labels.title }}"
+                    name="title"
+                    maxlength="90"
+                    value="{{ selected_item.title }}"
+                  ></md-outlined-text-field>
+                </div>
+                <div class="field">
+                  <md-outlined-text-field
+                    label="{{ copy.review_panel.labels.game }}"
+                    name="game"
+                    value="{{ selected_item.game or '' }}"
+                  ></md-outlined-text-field>
+                </div>
+              </div>
+
+              <div class="field-grid">
+                <div class="field">
+                  <md-outlined-select
+                    label="{{ copy.review_panel.labels.category }}"
+                    name="category"
+                    value="{{ selected_item.category }}"
+                  >
+                    <md-select-option value="announcement" {% if selected_item.category == "announcement" %}selected{% endif %}>
+                      <div slot="headline">{{ copy.preview_console.options.category.announcement }}</div>
+                    </md-select-option>
+                    <md-select-option value="teaser" {% if selected_item.category == "teaser" %}selected{% endif %}>
+                      <div slot="headline">{{ copy.preview_console.options.category.teaser }}</div>
+                    </md-select-option>
+                    <md-select-option value="patch" {% if selected_item.category == "patch" %}selected{% endif %}>
+                      <div slot="headline">{{ copy.preview_console.options.category.patch }}</div>
+                    </md-select-option>
+                    <md-select-option value="maintenance" {% if selected_item.category == "maintenance" %}selected{% endif %}>
+                      <div slot="headline">{{ copy.preview_console.options.category.maintenance }}</div>
+                    </md-select-option>
+                  </md-outlined-select>
+                </div>
+                <div class="field">
+                  <md-outlined-select
+                    label="{{ copy.review_panel.labels.theme }}"
+                    name="theme"
+                    value="{{ selected_item.theme }}"
+                  >
+                    <md-select-option value="light" {% if selected_item.theme == "light" %}selected{% endif %}>
+                      <div slot="headline">{{ copy.preview_console.options.theme.light }}</div>
+                    </md-select-option>
+                    <md-select-option value="dark" {% if selected_item.theme == "dark" %}selected{% endif %}>
+                      <div slot="headline">{{ copy.preview_console.options.theme.dark }}</div>
+                    </md-select-option>
+                  </md-outlined-select>
+                </div>
+              </div>
+
+              <div class="field">
+                <md-outlined-text-field
+                  type="textarea"
+                  rows="4"
+                  label="{{ copy.review_panel.labels.summary }}"
+                  name="summary"
+                  value="{{ selected_item.summary }}"
+                ></md-outlined-text-field>
+              </div>
+
+              <div class="field">
+                <md-outlined-text-field
+                  type="textarea"
+                  rows="6"
+                  label="{{ copy.review_panel.labels.highlights }}"
+                  name="highlights"
+                  supporting-text="{{ copy.review_panel.supporting.highlights }}"
+                  value="{{ selected_item.highlights_text }}"
+                ></md-outlined-text-field>
+              </div>
+
+              <div class="field-grid">
+                <div class="field">
+                  <md-outlined-select
+                    label="{{ copy.review_panel.labels.target_type }}"
+                    name="target_type"
+                    value=""
+                  >
+                    <md-select-option value="" selected>
+                      <div slot="headline">{{ copy.review_panel.labels.default_group }}</div>
+                    </md-select-option>
+                    <md-select-option value="group">
+                      <div slot="headline">{{ copy.review_panel.labels.group }}</div>
+                    </md-select-option>
+                    <md-select-option value="private">
+                      <div slot="headline">{{ copy.review_panel.labels.private }}</div>
+                    </md-select-option>
+                  </md-outlined-select>
+                </div>
+                <div class="field">
+                  <md-outlined-text-field
+                    label="{{ copy.review_panel.labels.target_id }}"
+                    name="target_id"
+                    placeholder="{{ default_group_id or copy.review_panel.labels.default_group }}"
+                  ></md-outlined-text-field>
+                </div>
+              </div>
+
+              <section class="supporting-panel">
+                <div>
+                  <p class="supporting-label">{{ copy.review_panel.supporting.structured_result }}</p>
+                  <p class="supporting-copy">{{ selected_item.structured_meta }}</p>
+                </div>
+                {% if selected_item.discovered_sources %}
+                <div class="chip-row">
+                  {% for source in selected_item.discovered_sources %}
+                  <span class="source-chip">{{ source }}</span>
+                  {% endfor %}
+                </div>
+                {% endif %}
+              </section>
+
+              <div class="action-row">
+                <md-filled-button id="rerender-button" type="button">{{ copy.review_panel.actions.rerender }}</md-filled-button>
+                <md-filled-tonal-button id="approve-send-button" type="button">{{ copy.review_panel.actions.approve_send }}</md-filled-tonal-button>
+                <md-outlined-button id="resend-button" type="button">{{ copy.review_panel.actions.resend }}</md-outlined-button>
+                <md-outlined-button id="reject-button" type="button">{{ copy.review_panel.actions.reject }}</md-outlined-button>
+                <a id="open-preview-link" class="link-button" href="{{ selected_item.preview_link }}" target="_blank" rel="noreferrer">{{ copy.review_panel.actions.open_preview }}</a>
+              </div>
+
+              <p id="status-banner" class="status-banner" role="status" aria-live="polite"></p>
+            </form>
+
+            <section class="info-block">
+              <p class="info-title">{{ copy.review_panel.info_blocks.raw_message }}</p>
+              <pre class="code-block">{{ selected_item.raw_content }}</pre>
+            </section>
+
+            <section class="info-block">
+              <p class="info-title">{{ copy.review_panel.info_blocks.raw_payload }}</p>
+              <pre class="code-block">{{ selected_item.raw_payload_json }}</pre>
+            </section>
+          </section>
+
+          <section class="preview-pane">
+            <div class="preview-card">
+              <div class="preview-card-header">
+                <div>
+                  <p class="eyebrow">{{ copy.review_panel.preview.eyebrow }}</p>
+                  <h3>{{ copy.review_panel.preview.title }}</h3>
+                </div>
+                <p class="preview-copy">{{ copy.review_panel.preview.copy }}</p>
+              </div>
+              <iframe
+                id="review-preview-frame"
+                class="preview-frame"
+                title="{{ copy.review_panel.preview.iframe_title }}"
+                src="{{ selected_item.preview_link }}"
+              ></iframe>
+            </div>
+
+            <div class="artifact-card">
+              <p class="info-title">{{ copy.review_panel.info_blocks.latest_artifact }}</p>
+              <p class="artifact-meta">{{ copy.review_panel.artifact_meta.theme }}: {{ selected_item.theme }} · {{ copy.review_panel.artifact_meta.html }}: {{ selected_item.latest_html_path or copy.review_panel.artifact_meta.not_rendered }}</p>
+              <p class="artifact-meta">{{ copy.review_panel.artifact_meta.image }}: {{ selected_item.latest_image_path or copy.review_panel.artifact_meta.no_screenshot }}</p>
+            </div>
+
+            <div class="artifact-card">
+              <p class="info-title">{{ copy.review_panel.info_blocks.recent_deliveries }}</p>
+              {% if selected_item.recent_deliveries %}
+                <ul class="delivery-list">
+                  {% for delivery in selected_item.recent_deliveries %}
+                  <li>
+                    <strong>{{ delivery.status }}</strong>
+                    <span>{{ delivery.target_type }}:{{ delivery.target_id }}</span>
+                    <span>{{ delivery.updated_at }}</span>
+                    <span>{{ delivery.trace_id }}</span>
+                  </li>
+                  {% endfor %}
+                </ul>
+              {% else %}
+                <p class="artifact-meta">{{ copy.review_panel.recent_deliveries_empty }}</p>
+              {% endif %}
+            </div>
+          </section>
+        </div>
+
+        <script>
+          const reviewCopy = {{ review_copy_json | safe }};
+          const selectedItemId = "{{ selected_item.id }}";
+          const statusFilter = "{{ status_filter }}";
+          const previewSeed = {{ selected_item.preview_seed_json | safe }};
+          const form = document.getElementById("review-form");
+          const previewFrame = document.getElementById("review-preview-frame");
+          const previewLink = document.getElementById("open-preview-link");
+          const statusBanner = document.getElementById("status-banner");
+          const rerenderButton = document.getElementById("rerender-button");
+          const approveSendButton = document.getElementById("approve-send-button");
+          const resendButton = document.getElementById("resend-button");
+          const rejectButton = document.getElementById("reject-button");
+
+          function readControl(name) {
+            return form.querySelector(`[name="${name}"]`);
+          }
+
+          function currentEditPayload() {
+            const highlights = (readControl("highlights").value || "")
+              .split(/\r?\n/)
+              .map((item) => item.trim())
+              .filter(Boolean);
+            const payload = {
+              title: (readControl("title").value || "").trim(),
+              summary: (readControl("summary").value || "").trim(),
+              highlights,
+              category: readControl("category").value || "announcement",
+              game: (readControl("game").value || "").trim() || null,
+              theme: readControl("theme").value || "light"
+            };
+            const targetType = readControl("target_type").value || "";
+            const targetId = (readControl("target_id").value || "").trim();
+            if (targetType && targetId) {
+              payload.target_type = targetType;
+              payload.target_id = targetId;
+            }
+            return payload;
+          }
+
+          function buildPreviewUrl() {
+            const edit = currentEditPayload();
+            const params = new URLSearchParams();
+            const previewPayload = {
+              ...previewSeed,
+              title: edit.title,
+              summary: edit.summary,
+              highlights: edit.highlights.join("\n"),
+              category: edit.category,
+              theme: edit.theme,
+              game: edit.game || "",
+              need_translation: previewSeed.need_translation ? "true" : "false",
+              discovered_sources: (previewSeed.discovered_sources || []).join("\n")
+            };
+            for (const [key, value] of Object.entries(previewPayload)) {
+              if (value === null || value === undefined || value === "") {
+                continue;
+              }
+              params.set(key, String(value));
+            }
+            return `/preview/md3/card?${params.toString()}`;
+          }
+
+          function refreshPreview() {
+            const url = buildPreviewUrl();
+            previewFrame.src = url;
+            previewLink.href = url;
+          }
+
+          function setBusy(isBusy) {
+            rerenderButton.disabled = isBusy;
+            approveSendButton.disabled = isBusy;
+            resendButton.disabled = isBusy;
+            rejectButton.disabled = isBusy;
+          }
+
+          function extractErrorMessage(payload) {
+            if (!payload) {
+              return reviewCopy.js.unknown_failure;
+            }
+            if (typeof payload.detail === "string") {
+              return payload.detail;
+            }
+            if (payload.detail && payload.detail.error) {
+              return payload.detail.error;
+            }
+            if (payload.error) {
+              return payload.error;
+            }
+            return reviewCopy.js.unknown_failure;
+          }
+
+          async function postAction(action, payload) {
+            setBusy(true);
+            statusBanner.textContent = reviewCopy.js.processing;
+            try {
+              const response = await fetch(`/api/review/${selectedItemId}/${action}`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json"
+                },
+                body: JSON.stringify(payload)
+              });
+              const result = await response.json();
+              if (!response.ok) {
+                throw new Error(extractErrorMessage(result));
+              }
+              statusBanner.textContent = result.message || reviewCopy.js.done;
+              window.setTimeout(() => {
+                window.location.href = `/review?status=${encodeURIComponent(statusFilter)}&processed_event_id=${encodeURIComponent(selectedItemId)}`;
+              }, 320);
+            } catch (error) {
+              statusBanner.textContent = error instanceof Error ? error.message : reviewCopy.js.failed;
+            } finally {
+              setBusy(false);
+            }
+          }
+
+          let previewTimer = null;
+          function schedulePreviewRefresh() {
+            window.clearTimeout(previewTimer);
+            previewTimer = window.setTimeout(refreshPreview, 180);
+          }
+
+          form.addEventListener("input", schedulePreviewRefresh);
+          form.addEventListener("change", schedulePreviewRefresh);
+
+          rerenderButton.addEventListener("click", () => {
+            postAction("rerender", currentEditPayload());
+          });
+          approveSendButton.addEventListener("click", () => {
+            postAction("approve-send", currentEditPayload());
+          });
+          resendButton.addEventListener("click", () => {
+            const payload = currentEditPayload();
+            postAction("resend", {
+              target_type: payload.target_type || null,
+              target_id: payload.target_id || null
+            });
+          });
+          rejectButton.addEventListener("click", () => {
+            postAction("reject", {});
+          });
+
+          refreshPreview();
+        </script>
+        {% else %}
+        <section class="empty-state empty-state--large">
+          <p class="eyebrow">{{ copy.review_panel.empty_large.eyebrow }}</p>
+          <h2>{{ copy.review_panel.empty_large.title }}</h2>
+          <p>{{ copy.review_panel.empty_large.copy }}</p>
+        </section>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>

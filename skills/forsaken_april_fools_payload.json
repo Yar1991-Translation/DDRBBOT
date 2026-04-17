@@ -1,0 +1,49 @@
+{
+  "title": "FORSAKEN 愚人节更新速览",
+  "summary": "根据 FORSAKEN Wiki 更新日志整理，Patch 4.1.0「April Fools」围绕限时整活皮肤、2x EXP、愚人节大厅和可前往 Swapsaken 的特殊入口展开，是一轮明显偏活动向和恶搞风格的版本更新。",
+  "highlights": [
+    "Patch 4.1.0 于更新日志中被标为 April Fools，活动期间开启了 2x EXP 加成",
+    "本次愚人节更新加入了 John Dough John Doe、c0llabk1dd c00lkidd、1Eggs 1x1x1x1、Insane Streamer Slasher、Confused Guest 666、Movies Free Guest 1337 等多款限时整活皮肤",
+    "除角色皮肤外，开发组还为除 Jane Doe 和 Taph 之外的大部分幸存者加入了限时 Voice Acted 语音皮肤，并补充了 Stone Dusekkar",
+    "大厅被改造成愚人节主题版本，更新日志还明确写到玩家可以前往 Cabin 附近的房屋传送到 Swapsaken",
+    "相关资料主要来自社区维护的 FORSAKEN Wiki，因此本卡片按社区整理内容处理，而非官方 Discord 原文公告"
+  ],
+  "category": "patch",
+  "theme": "dark",
+  "preset_key": "forsaken",
+  "game": "FORSAKEN",
+  "source_name": "FORSAKEN Wiki",
+  "channel_name": "updates",
+  "author": "Forsaken Dev Team / 社区整理",
+  "source_credibility": "community",
+  "need_translation": false,
+  "media": [
+    {
+      "type": "image",
+      "url": "https://static.wikia.nocookie.net/forsaken2024/images/9/9b/THE_GANG_IS_HERE%21%21%21%21.webp/revision/latest?cb=20260401011251",
+      "description": "愚人节活动宣传图，展示 John Dough、c0llabk1dd、Insane Streamer 与 1Eggs 这组整活核心皮肤。",
+      "reference_url": "https://forsaken2024.fandom.com/wiki/John_Doe/Skins",
+      "reference_label": "FORSAKEN Wiki - John Doe/Skins"
+    },
+    {
+      "type": "image",
+      "url": "https://static.wikia.nocookie.net/forsaken2024/images/7/7a/Brighttime.png/revision/latest?cb=20250403122721",
+      "description": "2025 愚人节大厅截图，展示 FORSAKEN 2 / April Fools 期间被重做的活动空间氛围。",
+      "reference_url": "https://forsaken2024.fandom.com/wiki/FORSAKEN_2",
+      "reference_label": "FORSAKEN Wiki - FORSAKEN 2"
+    },
+    {
+      "type": "image",
+      "url": "https://static.wikia.nocookie.net/forsaken2024/images/d/d4/Forsaken2frontnoob.jpeg/revision/latest?cb=20260226142251",
+      "description": "FORSAKEN 2 模式中的角色实机图，用来补充愚人节版本整体的恶搞视觉风格。",
+      "reference_url": "https://forsaken2024.fandom.com/wiki/FORSAKEN_2",
+      "reference_label": "FORSAKEN Wiki - FORSAKEN 2"
+    }
+  ],
+  "discovered_sources": [
+    "https://www.roblox.com/games/18687417158/Forsaken",
+    "https://forsaken2024.fandom.com/wiki/Update_Log",
+    "https://forsaken2024.fandom.com/wiki/John_Doe/Skins",
+    "https://forsaken2024.fandom.com/wiki/FORSAKEN_2"
+  ]
+}
