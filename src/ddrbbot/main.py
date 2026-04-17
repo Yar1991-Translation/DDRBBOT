@@ -48,16 +48,13 @@ from .rendering import NewsCardRenderer
 from .rss import RSSCollector
 from .rsshub import validate_rsshub_feed_url
 from .services import AppServices
+from .logging_setup import configure_logging
 from .utils import make_external_id, utc_now
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-)
 
 
 def create_app() -> FastAPI:
     settings = load_settings()
+    configure_logging(settings)
     services = _build_services(settings)
 
     @asynccontextmanager

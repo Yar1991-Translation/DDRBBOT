@@ -173,7 +173,31 @@ sudo journalctl -u ddrbbot.service -f
 
 更完整的说明见 `skills/ddrbbot-api-content/references/endpoints.md`。
 
-## 11. 故障排查
+## 11. 日志与 TUI 查看
+
+集中配置由 [`src/ddrbbot/logging_setup.py`](src/ddrbbot/logging_setup.py) 提供，按 `.env` 生效：
+
+| 变量 | 说明 |
+|------|------|
+| `LOG_LEVEL` | 根日志级别，默认 `INFO` |
+| `LOG_FORMAT` | `text`（默认可读）或 `json`（每行一条 JSON） |
+| `LOG_FILE` | 设置后写入文件并启用大小轮转；未设置则只输出到控制台 |
+| `LOG_FILE_MAX_BYTES` | 单文件上限，默认 `10485760`（10 MB） |
+| `LOG_FILE_BACKUP_COUNT` | 轮转保留数，默认 `5` |
+| `LOG_LEVEL_HTTPX` 等 | `LOG_LEVEL_<LOGGER>` 形式，`.` 转 `_`，默认对 `httpx`、`uvicorn.access`、`websockets`、`playwright` 等降噪到 `WARNING` |
+
+TUI 查看器：
+
+```bash
+pip install -e ".[tui]"
+LOG_FILE=/opt/DDRBBOT/artifacts/logs/ddrbbot.log ddrbbot-logs
+# 或显式指定
+ddrbbot-logs --file /opt/DDRBBOT/artifacts/logs/ddrbbot.log
+```
+
+快捷键：`q` 退出、`p` 暂停/继续、`g` 跳到底部、`c` 清屏。顶部可按级别下拉过滤、按 logger 子串过滤。轮转时会自动重开文件。
+
+## 12. 故障排查
 
 | 现象 | 排查 |
 |------|------|
