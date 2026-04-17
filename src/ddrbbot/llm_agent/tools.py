@@ -355,6 +355,37 @@ def build_default_registry(
             handler=_tool_send_reply_text(bot_adapter_sender),
         )
     )
+    if settings.llm_agent_shell_enabled:
+        registry.register(
+            ToolSpec(
+                name="run_shell",
+                description=(
+                    "Execute a shell command on the DDRBBOT host and return stdout/stderr/exit_code. "
+                    "Runs via /bin/sh -c (or cmd.exe on Windows). "
+                    "High privilege: use for maintenance / diagnostics only. "
+                    "Output and runtime are bounded by server settings."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "command": {"type": "string", "description": "The raw shell command line."},
+                        "timeout_seconds": {
+                            "type": "number",
+                            "minimum": 1,
+                            "maximum": 600,
+                            "description": "Optional override of default timeout (seconds).",
+                        },
+                        "workdir": {
+                            "type": "string",
+                            "description": "Optional working directory for the command.",
+                        },
+                    },
+                    "required": ["command"],
+                    "additionalProperties": False,
+                },
+                handler=_tool_run_shell(settings),
+            )
+        )
     if delivery_service is not None:
         registry.register(
             ToolSpec(
@@ -718,6 +749,62 @@ def _tool_send_reply_text(
         except Exception as exc:  # pragma: no cover - network dependent
             return {"ok": False, "error": f"send_failed: {exc}"}
         return {"ok": True, "data": {"route": route, "message_id": message_id}}
+
+    return handler
+
+
+def _tool_run_shell(settings: Settings) -> ToolHandler:
+    import asyncio as _asyncio
+    import os as _os
+
+    default_timeout = float(settings.llm_agent_shell_timeout_seconds)
+    output_limit = int(settings.llm_agent_shell_output_limit)
+    default_workdir = settings.llm_agent_shell_workdir
+
+    async def handler(context: AgentContext, arguments: dict[str, Any]) -> dict[str, Any]:
+        command = str(arguments.get("command") or "").strip()
+        if not command:
+            return {"ok": False, "error": "command is empty"}
+        timeout = float(arguments.get("timeout_seconds") or default_timeout)
+        timeout = max(1.0, min(timeout, 600.0))
+        workdir = str(arguments.get("workdir") or "").strip() or default_workdir
+        cwd = workdir if workdir and _os.path.isdir(workdir) else None
+        try:
+            process = await _asyncio.create_subprocess_shell(
+                command,
+                stdout=_asyncio.subprocess.PIPE,
+                stderr=_asyncio.subprocess.PIPE,
+                cwd=cwd,
+            )
+        except Exception as exc:
+            return {"ok": False, "error": f"spawn_failed: {exc}"}
+        try:
+            stdout_bytes, stderr_bytes = await _asyncio.wait_for(
+                process.communicate(), timeout=timeout
+            )
+        except _asyncio.TimeoutError:
+            try:
+                process.kill()
+            except Exception:
+                pass
+            return {"ok": False, "error": f"timeout after {timeout:.1f}s"}
+
+        def _decode(data: bytes) -> str:
+            text = data.decode("utf-8", errors="replace")
+            if len(text) > output_limit:
+                return text[:output_limit] + f"\n...[truncated {len(text) - output_limit} chars]"
+            return text
+
+        return {
+            "ok": (process.returncode == 0),
+            "data": {
+                "exit_code": process.returncode,
+                "stdout": _decode(stdout_bytes),
+                "stderr": _decode(stderr_bytes),
+                "cwd": cwd,
+                "command": command,
+            },
+        }
 
     return handler
 

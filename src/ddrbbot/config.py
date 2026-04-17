@@ -64,6 +64,10 @@ class Settings:
     rsshub_host_markers: frozenset[str]
     rsshub_extra_hosts: frozenset[str]
     qq_image_fail_text_fallback_enabled: bool
+    llm_agent_shell_enabled: bool
+    llm_agent_shell_timeout_seconds: float
+    llm_agent_shell_output_limit: int
+    llm_agent_shell_workdir: str | None
 
 
 def load_settings() -> Settings:
@@ -120,4 +124,12 @@ def load_settings() -> Settings:
         rsshub_host_markers=_env_csv("RSSHUB_HOST_MARKERS") or frozenset({"rsshub"}),
         rsshub_extra_hosts=_env_csv("RSSHUB_EXTRA_HOSTS") or frozenset({"localhost", "127.0.0.1"}),
         qq_image_fail_text_fallback_enabled=_env_bool("QQ_IMAGE_FAIL_TEXT_FALLBACK", True),
+        llm_agent_shell_enabled=_env_bool("LLM_AGENT_SHELL_ENABLED", False),
+        llm_agent_shell_timeout_seconds=max(
+            float(os.getenv("LLM_AGENT_SHELL_TIMEOUT_SECONDS", "30")), 1.0
+        ),
+        llm_agent_shell_output_limit=max(
+            int(os.getenv("LLM_AGENT_SHELL_OUTPUT_LIMIT", "20000")), 1024
+        ),
+        llm_agent_shell_workdir=(os.getenv("LLM_AGENT_SHELL_WORKDIR") or "").strip() or None,
     )
