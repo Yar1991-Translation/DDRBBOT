@@ -263,7 +263,7 @@
       "secondary_media": "配图可以不填；填了 URL 的话，说明和参考信息也会一起展示。",
       "custom_css": "在当前预设样式基础上微调。",
       "custom_css_hint": "注意控制代码长度，URL 预览会比较稳定。",
-      "preset_unavailable": "这个预设还没开发，先临时退回 Roblox 预设。"
+      "preset_unavailable": "这个预设尚未开发，暂时用 Roblox 预设顶着。"
     },
     "sections": {
       "hero_media": "主图",

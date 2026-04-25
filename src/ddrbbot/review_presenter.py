@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode
 
 from fastapi import HTTPException
@@ -10,8 +10,10 @@ from .copybook import copy_dict, copy_format, copy_list, copy_text
 from .database import _RAW_PATCH_MISSING
 from .delivery import DeliveryError
 from .models import ProcessedEvent, RawEvent, ReviewEditRequest
-from .services import AppServices
 from .utils import utc_now
+
+if TYPE_CHECKING:
+    from .services import AppServices
 
 
 def review_statuses(status: str) -> tuple[str, ...] | None:
