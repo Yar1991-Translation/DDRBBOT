@@ -56,6 +56,9 @@ def _settings(tmp_path: Path, *, enabled: bool = True) -> Settings:
         llm_agent_shell_timeout_seconds=30.0,
         llm_agent_shell_output_limit=20000,
         llm_agent_shell_workdir=None,
+        google_custom_search_api_key=None,
+        google_custom_search_engine_id=None,
+        bing_search_api_key=None,
     )
 
 

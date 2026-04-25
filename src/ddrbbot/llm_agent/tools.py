@@ -176,6 +176,111 @@ def build_default_registry(
     )
     registry.register(
         ToolSpec(
+            name="fetch_x_tweets",
+            description=(
+                "Fetch recent tweets from an X (Twitter) user. "
+                "Provide the X user ID (screen name, e.g. 'Roblox' or 'DoorGame'). "
+                "Fetches via Jina AI reader over x.com."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "x_user_id": {
+                        "type": "string",
+                        "description": "X/Twitter screen name (without @), e.g. 'Roblox'",
+                    },
+                    "max_bytes": {
+                        "type": "integer",
+                        "minimum": 1024,
+                        "maximum": 200000,
+                        "default": 65536,
+                    },
+                    "timeout_seconds": {
+                        "type": "number",
+                        "minimum": 1,
+                        "maximum": 60,
+                        "default": 15,
+                    },
+                },
+                "required": ["x_user_id"],
+                "additionalProperties": False,
+            },
+            handler=_tool_fetch_x_tweets,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="web_search",
+            description=(
+                "Search the web using Google Custom Search. "
+                "Returns titles, links, and snippets for each result. "
+                "Use this to find up-to-date information, news, or facts."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query string"},
+                    "num": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10,
+                        "default": 5,
+                        "description": "Number of results (1-10)",
+                    },
+                    "timeout_seconds": {
+                        "type": "number",
+                        "minimum": 1,
+                        "maximum": 30,
+                        "default": 15,
+                    },
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+            handler=_tool_web_search(
+                settings.google_custom_search_api_key,
+                settings.google_custom_search_engine_id,
+            ),
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="bing_search",
+            description=(
+                "Search the web using Bing Web Search API. "
+                "Returns titles, links, and snippets for each result."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query string"},
+                    "count": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10,
+                        "default": 5,
+                        "description": "Number of results (1-10)",
+                    },
+                    "market": {
+                        "type": "string",
+                        "default": "zh-CN",
+                        "description": "Market code (e.g. zh-CN, en-US)",
+                    },
+                    "timeout_seconds": {
+                        "type": "number",
+                        "minimum": 1,
+                        "maximum": 30,
+                        "default": 15,
+                    },
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+            handler=_tool_bing_search(settings.bing_search_api_key),
+        )
+    )
+    registry.register(
+        ToolSpec(
             name="collect_rss",
             description=(
                 "Pull a generic RSS/Atom feed, insert new raw events and enqueue them "
@@ -516,6 +621,89 @@ async def _tool_fetch_url(context: AgentContext, arguments: dict[str, Any]) -> d
             "truncated": len(response.text) > len(text),
         },
     }
+
+
+async def _tool_fetch_x_tweets(context: AgentContext, arguments: dict[str, Any]) -> dict[str, Any]:
+    x_user_id = str(arguments.get("x_user_id") or "").strip()
+    if not x_user_id:
+        return {"ok": False, "error": "x_user_id is required"}
+    url = f"https://r.jina.ai/https://x.com/{x_user_id}"
+    max_bytes = int(arguments.get("max_bytes") or 65536)
+    timeout = float(arguments.get("timeout_seconds") or 15)
+    try:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            response = await client.get(url)
+    except Exception as exc:
+        return {"ok": False, "error": f"fetch_failed: {exc}"}
+    text = response.text[: max(1024, min(max_bytes, 200000))]
+    return {
+        "ok": True,
+        "data": {
+            "status_code": response.status_code,
+            "url": url,
+            "text": text,
+            "truncated": len(response.text) > len(text),
+        },
+    }
+
+
+def _tool_web_search(api_key: str | None, cx: str | None) -> ToolHandler:
+    async def handler(context: AgentContext, arguments: dict[str, Any]) -> dict[str, Any]:
+        query = str(arguments.get("query") or "").strip()
+        if not query:
+            return {"ok": False, "error": "query is required"}
+        if not api_key or not cx:
+            return {"ok": False, "error": "google_custom_search not configured (set GOOGLE_CUSTOM_SEARCH_API_KEY and GOOGLE_CUSTOM_SEARCH_ENGINE_ID)"}
+        num = int(arguments.get("num") or 5)
+        num = max(1, min(num, 10))
+        url = "https://www.googleapis.com/customsearch/v1"
+        params = {"key": api_key, "cx": cx, "q": query, "num": str(num)}
+        timeout = float(arguments.get("timeout_seconds") or 15)
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.get(url, params=params)
+                response.raise_for_status()
+                data = response.json()
+        except Exception as exc:
+            return {"ok": False, "error": f"search_failed: {exc}"}
+        items = (data.get("items") or [])[:num]
+        results = [
+            {"title": it.get("title"), "link": it.get("link"), "snippet": it.get("snippet")}
+            for it in items
+        ]
+        return {"ok": True, "data": {"query": query, "total_results": len(results), "results": results}}
+    return handler
+
+
+def _tool_bing_search(api_key: str | None) -> ToolHandler:
+    async def handler(context: AgentContext, arguments: dict[str, Any]) -> dict[str, Any]:
+        query = str(arguments.get("query") or "").strip()
+        if not query:
+            return {"ok": False, "error": "query is required"}
+        if not api_key:
+            return {"ok": False, "error": "bing_search not configured (set BING_SEARCH_API_KEY)"}
+        count = int(arguments.get("count") or 5)
+        count = max(1, min(count, 10))
+        market = str(arguments.get("market") or "zh-CN")
+        timeout = float(arguments.get("timeout_seconds") or 15)
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.get(
+                    "https://api.bing.microsoft.com/v7.0/search",
+                    params={"q": query, "count": str(count), "mkt": market},
+                    headers={"Ocp-Apim-Subscription-Key": api_key},
+                )
+                response.raise_for_status()
+                data = response.json()
+        except Exception as exc:
+            return {"ok": False, "error": f"search_failed: {exc}"}
+        items = (data.get("webPages", {}).get("value") or [])[:count]
+        results = [
+            {"title": it.get("name"), "link": it.get("url"), "snippet": it.get("snippet")}
+            for it in items
+        ]
+        return {"ok": True, "data": {"query": query, "total_results": len(results), "results": results}}
+    return handler
 
 
 def _tool_collect_rss(

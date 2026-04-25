@@ -68,6 +68,9 @@ class Settings:
     llm_agent_shell_timeout_seconds: float
     llm_agent_shell_output_limit: int
     llm_agent_shell_workdir: str | None
+    google_custom_search_api_key: str | None
+    google_custom_search_engine_id: str | None
+    bing_search_api_key: str | None
 
 
 def load_settings() -> Settings:
@@ -132,4 +135,12 @@ def load_settings() -> Settings:
             int(os.getenv("LLM_AGENT_SHELL_OUTPUT_LIMIT", "20000")), 1024
         ),
         llm_agent_shell_workdir=(os.getenv("LLM_AGENT_SHELL_WORKDIR") or "").strip() or None,
+        google_custom_search_api_key=(
+            os.getenv("GOOGLE_CUSTOM_SEARCH_API_KEY")
+            or "AIzaSyB4KYbNdXiAwp7ZOz1l-hgiz8lfeVGUH0I"
+        ),
+        google_custom_search_engine_id=(
+            os.getenv("GOOGLE_CUSTOM_SEARCH_ENGINE_ID") or None
+        ),
+        bing_search_api_key=os.getenv("BING_SEARCH_API_KEY") or None,
     )
