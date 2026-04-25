@@ -43,14 +43,6 @@ class QQOperationsService:
         self.delivery_service = delivery_service
         self.pipeline = pipeline
 
-    async def health_snapshot(self) -> dict[str, Any]:
-        connected = await self.bot_adapter.health_check()
-        return {
-            "connected": connected,
-            "queue_size": self.pipeline.queue_size(),
-            "failed_deliveries": self.delivery_service.failed_records_count(),
-        }
-
     async def adapter_snapshot(
         self,
         *,

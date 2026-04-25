@@ -174,7 +174,6 @@ class ChatService:
                     tool_calls=list(msg.get("tool_calls")) if msg.get("tool_calls") else None,
                     created_at=utc_now(),
                 )
-                self.repository.append_chat_message(record)
                 records.append(record)
             elif role == "tool":
                 tool_call_id = msg.get("tool_call_id")
@@ -188,6 +187,7 @@ class ChatService:
                     tool_call_id=str(tool_call_id),
                     created_at=utc_now(),
                 )
-                self.repository.append_chat_message(record)
                 records.append(record)
+        if records:
+            self.repository.append_chat_messages_batch(records)
         return records

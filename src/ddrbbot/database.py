@@ -206,16 +206,32 @@ class SQLiteRepository:
     def __init__(self, database_path: Path) -> None:
         self.database_path = database_path
         self._lock = threading.RLock()
+        self._connection: sqlite3.Connection | None = None
+
+    def _get_connection(self) -> sqlite3.Connection:
+        if self._connection is None:
+            conn = sqlite3.connect(self.database_path, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            self._connection = conn
+        return self._connection
+
+    def close(self) -> None:
+        conn = self._connection
+        if conn is not None:
+            self._connection = None
+            conn.close()
 
     def initialize(self) -> None:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
-        with self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             connection.executescript(SCHEMA)
             self._run_migrations_locked(connection)
             connection.commit()
 
     def insert_raw_event(self, event: RawEvent) -> bool:
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             source_id = self._ensure_source_locked(
                 connection,
                 source_type=event.source_type,
@@ -249,7 +265,8 @@ class SQLiteRepository:
             return cursor.rowcount > 0
 
     def get_raw_event(self, raw_event_id: str) -> RawEvent | None:
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             row = connection.execute(
                 "SELECT * FROM raw_events WHERE id = ?",
                 (raw_event_id,),
@@ -257,7 +274,8 @@ class SQLiteRepository:
         return self._row_to_raw_event(row) if row else None
 
     def update_raw_event_status(self, raw_event_id: str, status: str) -> None:
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             connection.execute(
                 "UPDATE raw_events SET status = ? WHERE id = ?",
                 (status, raw_event_id),
@@ -265,7 +283,8 @@ class SQLiteRepository:
             connection.commit()
 
     def upsert_processed_event(self, event: ProcessedEvent) -> None:
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             connection.execute(
                 """
                 INSERT INTO processed_events (
@@ -329,12 +348,14 @@ class SQLiteRepository:
             return
         parameters.append(processed_event_id)
         statement = f"UPDATE processed_events SET {', '.join(updates)} WHERE id = ?"
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             connection.execute(statement, tuple(parameters))
             connection.commit()
 
     def get_processed_event(self, processed_event_id: str) -> ProcessedEvent | None:
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             row = connection.execute(
                 "SELECT * FROM processed_events WHERE id = ?",
                 (processed_event_id,),
@@ -349,7 +370,8 @@ class SQLiteRepository:
         feed_url: str | None = None,
     ) -> None:
         now = isoformat_z(utc_now())
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             self._ensure_source_locked(connection, source_type=source_type, source_name=source_name)
             if feed_url:
                 connection.execute(
@@ -369,7 +391,8 @@ class SQLiteRepository:
 
     def list_sources(self, *, limit: int = 50) -> list[dict[str, Any]]:
         cap = max(1, min(limit, 200))
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             rows = connection.execute(
                 """
                 SELECT id, source_type, name, url, status, credibility_level, last_checked_at, created_at
@@ -391,7 +414,8 @@ class SQLiteRepository:
     ) -> dict[str, Any]:
         now = isoformat_z(utc_now())
         source_id = f"src_{abs(hash((source_type, name)))}"
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             existing = connection.execute(
                 "SELECT id FROM sources WHERE source_type = ? AND name = ?",
                 (source_type, name),
@@ -442,9 +466,22 @@ class SQLiteRepository:
         query = f"{query} ORDER BY published_at DESC, created_at DESC LIMIT ?"
         parameters.append(max(limit, 1))
 
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             rows = connection.execute(query, tuple(parameters)).fetchall()
         return [self._row_to_processed_event(row) for row in rows]
+
+    def get_raw_events_batch(self, raw_event_ids: list[str]) -> dict[str, RawEvent]:
+        """Fetch multiple raw events in a single query. Returns {id: RawEvent}."""
+        if not raw_event_ids:
+            return {}
+        deduplicated = list(dict.fromkeys(raw_event_ids))
+        placeholders = ", ".join("?" for _ in deduplicated)
+        query = f"SELECT * FROM raw_events WHERE id IN ({placeholders})"
+        with self._lock:
+            connection = self._get_connection()
+            rows = connection.execute(query, tuple(deduplicated)).fetchall()
+        return {str(row["id"]): self._row_to_raw_event(row) for row in rows}
 
     def update_processed_event_review_fields(
         self,
@@ -506,7 +543,8 @@ class SQLiteRepository:
             return
         parameters.append(processed_event_id)
         statement = f"UPDATE processed_events SET {', '.join(updates)} WHERE id = ?"
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             connection.execute(statement, tuple(parameters))
             connection.commit()
 
@@ -518,7 +556,8 @@ class SQLiteRepository:
         author: Any = _RAW_PATCH_MISSING,
         raw_payload_merge: dict[str, Any] | None = None,
     ) -> None:
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             row = connection.execute(
                 "SELECT channel_name, author, raw_payload_json FROM raw_events WHERE id = ?",
                 (raw_event_id,),
@@ -550,7 +589,8 @@ class SQLiteRepository:
             connection.commit()
 
     def save_render_artifact(self, artifact: RenderArtifact) -> None:
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             connection.execute(
                 """
                 INSERT INTO render_artifacts (
@@ -573,7 +613,8 @@ class SQLiteRepository:
             connection.commit()
 
     def get_latest_render_artifact(self, processed_event_id: str) -> RenderArtifact | None:
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             row = connection.execute(
                 """
                 SELECT * FROM render_artifacts
@@ -586,7 +627,8 @@ class SQLiteRepository:
         return self._row_to_render_artifact(row) if row else None
 
     def save_delivery_log(self, log: DeliveryLog) -> None:
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             connection.execute(
                 """
                 INSERT INTO delivery_logs (
@@ -608,7 +650,8 @@ class SQLiteRepository:
             connection.commit()
 
     def reserve_delivery_record(self, record: DeliveryRecord) -> tuple[DeliveryRecord, bool]:
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             row = connection.execute(
                 "SELECT * FROM delivery_records WHERE trace_id = ?",
                 (record.trace_id,),
@@ -647,7 +690,8 @@ class SQLiteRepository:
             return record, True
 
     def get_delivery_record(self, trace_id: str) -> DeliveryRecord | None:
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             row = connection.execute(
                 "SELECT * FROM delivery_records WHERE trace_id = ?",
                 (trace_id,),
@@ -697,7 +741,8 @@ class SQLiteRepository:
         parameters.append(isoformat_z(utc_now()))
         parameters.append(trace_id)
         statement = f"UPDATE delivery_records SET {', '.join(updates)} WHERE trace_id = ?"
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             connection.execute(statement, tuple(parameters))
             connection.commit()
 
@@ -718,12 +763,14 @@ class SQLiteRepository:
             f"LIMIT ?"
         )
         parameters: list[Any] = list(statuses) + [now_iso, max(limit, 1)]
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             rows = connection.execute(query, tuple(parameters)).fetchall()
         return [self._row_to_delivery_record(row) for row in rows]
 
     def get_delivery_record_by_id(self, record_id: str) -> DeliveryRecord | None:
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             row = connection.execute(
                 "SELECT * FROM delivery_records WHERE id = ?",
                 (record_id,),
@@ -753,7 +800,8 @@ class SQLiteRepository:
         query = f"{query} ORDER BY updated_at DESC LIMIT ?"
         parameters.append(max(limit, 1))
 
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             rows = connection.execute(query, tuple(parameters)).fetchall()
         return [self._row_to_delivery_record(row) for row in rows]
 
@@ -769,12 +817,14 @@ class SQLiteRepository:
         if clauses:
             query = f"{query} WHERE {' AND '.join(clauses)}"
 
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             row = connection.execute(query, tuple(parameters)).fetchone()
         return int(row[0]) if row else 0
 
     def save_platform_event(self, event: QQInboundEvent) -> None:
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             connection.execute(
                 """
                 INSERT INTO platform_events (
@@ -806,7 +856,8 @@ class SQLiteRepository:
         user_id: str | None = None,
     ) -> ChatSession:
         now = utc_now()
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             row = connection.execute(
                 "SELECT * FROM chat_sessions WHERE session_key = ?",
                 (session_key,),
@@ -851,7 +902,8 @@ class SQLiteRepository:
             return session
 
     def get_chat_session(self, session_id: str) -> ChatSession | None:
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             row = connection.execute(
                 "SELECT * FROM chat_sessions WHERE id = ?",
                 (session_id,),
@@ -859,7 +911,8 @@ class SQLiteRepository:
         return self._row_to_chat_session(row) if row else None
 
     def get_chat_session_by_key(self, session_key: str) -> ChatSession | None:
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             row = connection.execute(
                 "SELECT * FROM chat_sessions WHERE session_key = ?",
                 (session_key,),
@@ -903,12 +956,14 @@ class SQLiteRepository:
         parameters.append(isoformat_z(utc_now()))
         parameters.append(session_id)
         statement = f"UPDATE chat_sessions SET {', '.join(updates)} WHERE id = ?"
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             connection.execute(statement, tuple(parameters))
             connection.commit()
 
     def clear_chat_messages(self, session_id: str) -> None:
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             connection.execute(
                 "DELETE FROM chat_messages WHERE session_id = ?",
                 (session_id,),
@@ -916,7 +971,8 @@ class SQLiteRepository:
             connection.commit()
 
     def append_chat_message(self, record: ChatMessageRecord) -> None:
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             connection.execute(
                 """
                 INSERT INTO chat_messages (
@@ -940,6 +996,37 @@ class SQLiteRepository:
             )
             connection.commit()
 
+    def append_chat_messages_batch(self, records: list[ChatMessageRecord]) -> None:
+        if not records:
+            return
+        with self._lock:
+            connection = self._get_connection()
+            rows = []
+            for record in records:
+                rows.append((
+                    record.id,
+                    record.session_id,
+                    record.role,
+                    record.content,
+                    record.name,
+                    record.tool_call_id,
+                    json.dumps(record.tool_calls, ensure_ascii=False)
+                    if record.tool_calls
+                    else None,
+                    isoformat_z(record.created_at),
+                ))
+            connection.executemany(
+                """
+                INSERT INTO chat_messages (
+                  id, session_id, role, content, name, tool_call_id,
+                  tool_calls_json, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
+            connection.commit()
+
     def list_chat_messages(
         self,
         session_id: str,
@@ -947,7 +1034,8 @@ class SQLiteRepository:
         limit: int = 20,
     ) -> list[ChatMessageRecord]:
         capped = max(1, min(limit, 200))
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             rows = connection.execute(
                 """
                 SELECT * FROM chat_messages
@@ -962,7 +1050,8 @@ class SQLiteRepository:
         return records
 
     def count_chat_messages(self, session_id: str) -> int:
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             row = connection.execute(
                 "SELECT COUNT(*) FROM chat_messages WHERE session_id = ?",
                 (session_id,),
@@ -971,7 +1060,8 @@ class SQLiteRepository:
 
     def trim_chat_messages(self, session_id: str, *, keep_latest: int) -> int:
         kept = max(keep_latest, 0)
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             cursor = connection.execute(
                 """
                 DELETE FROM chat_messages
@@ -990,7 +1080,8 @@ class SQLiteRepository:
 
     def upsert_chat_profile(self, profile: ChatProfile) -> ChatProfile:
         now = utc_now()
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             row = connection.execute(
                 "SELECT id, created_at FROM chat_profiles WHERE scope = ? AND user_id = ?",
                 (profile.scope, profile.user_id),
@@ -1040,7 +1131,8 @@ class SQLiteRepository:
         return profile
 
     def get_chat_profile(self, *, scope: str, user_id: str) -> ChatProfile | None:
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             row = connection.execute(
                 "SELECT * FROM chat_profiles WHERE scope = ? AND user_id = ?",
                 (scope, user_id),
@@ -1049,7 +1141,8 @@ class SQLiteRepository:
 
     def upsert_chat_persona(self, persona: ChatPersona) -> ChatPersona:
         now = utc_now()
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             row = connection.execute(
                 "SELECT id, created_at FROM chat_personas WHERE persona_key = ?",
                 (persona.persona_key,),
@@ -1105,7 +1198,8 @@ class SQLiteRepository:
         return persona
 
     def get_chat_persona(self, persona_id_or_key: str) -> ChatPersona | None:
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             row = connection.execute(
                 "SELECT * FROM chat_personas WHERE id = ? OR persona_key = ? LIMIT 1",
                 (persona_id_or_key, persona_id_or_key),
@@ -1113,7 +1207,8 @@ class SQLiteRepository:
         return self._row_to_chat_persona(row) if row else None
 
     def list_chat_personas(self, *, include_custom: bool = True) -> list[ChatPersona]:
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             if include_custom:
                 rows = connection.execute(
                     "SELECT * FROM chat_personas ORDER BY is_builtin DESC, persona_key ASC"
@@ -1125,7 +1220,8 @@ class SQLiteRepository:
         return [self._row_to_chat_persona(row) for row in rows]
 
     def delete_chat_persona(self, persona_id_or_key: str) -> bool:
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             cursor = connection.execute(
                 "DELETE FROM chat_personas WHERE (id = ? OR persona_key = ?) AND is_builtin = 0",
                 (persona_id_or_key, persona_id_or_key),
@@ -1135,7 +1231,8 @@ class SQLiteRepository:
 
     def upsert_chat_knowledge_item(self, item: ChatKnowledgeItem) -> ChatKnowledgeItem:
         now = utc_now()
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             row = connection.execute(
                 "SELECT id, created_at FROM chat_knowledge_items WHERE id = ?",
                 (item.id,),
@@ -1183,7 +1280,8 @@ class SQLiteRepository:
         return item
 
     def delete_chat_knowledge_item(self, item_id: str) -> bool:
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             cursor = connection.execute(
                 "DELETE FROM chat_knowledge_items WHERE id = ?",
                 (item_id,),
@@ -1193,7 +1291,8 @@ class SQLiteRepository:
 
     def list_chat_knowledge_items(self, *, limit: int = 100) -> list[ChatKnowledgeItem]:
         capped = max(1, min(limit, 500))
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             rows = connection.execute(
                 """
                 SELECT * FROM chat_knowledge_items
@@ -1225,12 +1324,14 @@ class SQLiteRepository:
             "ORDER BY priority DESC, datetime(updated_at) DESC LIMIT ?"
         )
         parameters.append(max(1, min(limit, 20)))
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             rows = connection.execute(statement, tuple(parameters)).fetchall()
         return [self._row_to_chat_knowledge_item(row) for row in rows]
 
     def get_stats(self) -> dict[str, int]:
-        with self._lock, self._connect() as connection:
+        with self._lock:
+            connection = self._get_connection()
             def count(query: str) -> int:
                 row = connection.execute(query).fetchone()
                 return int(row[0]) if row else 0
@@ -1248,11 +1349,6 @@ class SQLiteRepository:
                 "chat_profiles": count("SELECT COUNT(*) FROM chat_profiles"),
                 "chat_knowledge_items": count("SELECT COUNT(*) FROM chat_knowledge_items"),
             }
-
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.database_path, check_same_thread=False)
-        connection.row_factory = sqlite3.Row
-        return connection
 
     def _ensure_source_locked(
         self,

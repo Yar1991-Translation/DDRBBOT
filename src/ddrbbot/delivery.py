@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -178,161 +177,6 @@ class QQDeliveryService:
     def request_from_record(self, record: DeliveryRecord) -> QQSendNewsCardRequest:
         return self._request_from_record(record)
 
-    async def send_news_card(
-        self,
-        request: QQSendNewsCardRequest,
-        *,
-        manual_retry: bool = False,
-    ) -> DeliveryExecutionResult:
-        trace_id = request.trace_id or self._build_trace_id(request)
-        request_payload = self._request_payload(request)
-        record, created = self.repository.reserve_delivery_record(
-            DeliveryRecord(
-                trace_id=trace_id,
-                processed_event_id=request.processed_event_id,
-                target_type=request.target_type,
-                target_id=request.target_id,
-                request_payload=request_payload,
-            )
-        )
-        if not created:
-            self.repository.update_delivery_record(
-                trace_id,
-                processed_event_id=request.processed_event_id or record.processed_event_id,
-                request_payload=request_payload,
-            )
-            record = self.repository.get_delivery_record(trace_id) or record
-        if not created and record.status == "sent" and record.message_id:
-            return DeliveryExecutionResult(
-                trace_id=trace_id,
-                status="duplicate",
-                message_id=record.message_id,
-                attempts=record.attempts,
-                target_type=record.target_type,
-                target_id=record.target_id,
-                deduplicated=True,
-            )
-
-        route = f"{request.target_type}:{request.target_id}"
-        try:
-            image_path = self._validate_image_path(request.image_path)
-        except (FileNotFoundError, FileTooLargeError) as exc:
-            current_attempt = record.attempts + 1
-            self.repository.save_delivery_log(
-                DeliveryLog(
-                    processed_event_id=request.processed_event_id,
-                    target_id=route,
-                    delivery_result="failed",
-                    error_message=str(exc),
-                )
-            )
-            self.repository.update_delivery_record(
-                trace_id,
-                status="failed",
-                error_code=type(exc).__name__,
-                error_message=str(exc),
-                attempts=current_attempt,
-            )
-            raise DeliveryError(trace_id, current_attempt, str(exc)) from exc
-
-        schedule = self._retry_schedule(record.attempts, manual_retry=manual_retry)
-        if not schedule:
-            raise DeliveryError(
-                trace_id,
-                record.attempts,
-                copy_text("delivery.retry_exhausted", "Delivery retry budget exhausted."),
-            )
-
-        last_error = record.error_message or copy_text("delivery.generic_failed", "Delivery failed.")
-        for attempt_offset, delay in enumerate(schedule, start=1):
-            current_attempt = record.attempts + attempt_offset
-            if delay > 0:
-                await asyncio.sleep(delay)
-            try:
-                message_id = await self.bot_adapter.send_news_card(
-                    route,
-                    str(image_path),
-                    request.caption,
-                )
-            except Exception as exc:
-                last_error = str(exc)
-                self.repository.save_delivery_log(
-                    DeliveryLog(
-                        processed_event_id=request.processed_event_id,
-                        target_id=route,
-                        delivery_result="failed",
-                        error_message=last_error,
-                    )
-                )
-                self.repository.update_delivery_record(
-                    trace_id,
-                    status="failed",
-                    error_code=type(exc).__name__,
-                    error_message=last_error,
-                    attempts=current_attempt,
-                )
-                continue
-
-            self.repository.save_delivery_log(
-                DeliveryLog(
-                    processed_event_id=request.processed_event_id,
-                    target_id=route,
-                    delivery_result="sent",
-                    message_id=message_id,
-                )
-            )
-            self.repository.update_delivery_record(
-                trace_id,
-                status="sent",
-                message_id=message_id,
-                error_code="",
-                error_message="",
-                attempts=current_attempt,
-            )
-            return DeliveryExecutionResult(
-                trace_id=trace_id,
-                status="sent",
-                message_id=message_id,
-                attempts=current_attempt,
-                target_type=request.target_type,
-                target_id=request.target_id,
-            )
-
-        if self.settings.qq_image_fail_text_fallback_enabled:
-            text = self._build_text_fallback(request)
-            if text:
-                try:
-                    message_id = await self.bot_adapter.send_text(route, text[:3500])
-                    self.repository.save_delivery_log(
-                        DeliveryLog(
-                            processed_event_id=request.processed_event_id,
-                            target_id=route,
-                            delivery_result="sent_text_fallback",
-                            message_id=message_id or None,
-                            error_message=None,
-                        )
-                    )
-                    self.repository.update_delivery_record(
-                        trace_id,
-                        status="sent",
-                        message_id=message_id or "",
-                        error_code="text_fallback",
-                        error_message=last_error,
-                        attempts=record.attempts + len(schedule) + 1,
-                    )
-                    return DeliveryExecutionResult(
-                        trace_id=trace_id,
-                        status="sent_text_fallback",
-                        message_id=message_id or None,
-                        attempts=record.attempts + len(schedule) + 1,
-                        target_type=request.target_type,
-                        target_id=request.target_id,
-                    )
-                except Exception as exc2:  # pragma: no cover - network
-                    last_error = f"{last_error} | text_fallback: {exc2}"
-
-        raise DeliveryError(trace_id, record.attempts + len(schedule), last_error)
-
     def _build_text_fallback(self, request: QQSendNewsCardRequest) -> str | None:
         parts: list[str] = []
         if request.processed_event_id:
@@ -404,17 +248,6 @@ class QQDeliveryService:
                 copy_text("delivery.record_not_failed", "Delivery record is not failed."),
             )
         return self.requeue_record(record)
-
-    def _retry_schedule(
-        self,
-        attempts_already_used: int,
-        *,
-        manual_retry: bool = False,
-    ) -> tuple[float, ...]:
-        schedule = (0.0, *self.settings.delivery_retry_delays_seconds)
-        if attempts_already_used >= len(schedule):
-            return (0.0,) if manual_retry else ()
-        return schedule[attempts_already_used:]
 
     @staticmethod
     def _build_trace_id(request: QQSendNewsCardRequest) -> str:

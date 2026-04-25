@@ -2,19 +2,19 @@
   "presets": {
     "roblox": {
       "label": "Roblox",
-      "description": "复刻旧版 Roblox 官网风格。适用于平台公告、社区动态与综合快讯。"
+      "description": "复刻旧版 Roblox 官网风格。适合发平台公告、社区动态和综合快讯。"
     },
     "doors": {
       "label": "DOORS",
-      "description": "深色高压迫感风格。适用于预告、实体异动及版本前瞻。"
+      "description": "深色高压迫感风格，发预告、实体变动和版本前瞻时用。"
     },
     "pressure": {
       "label": "Pressure",
-      "description": "冷色工业风。适用于维护说明、设施动态与系统更新。"
+      "description": "冷色工业风，适合维护说明、设施动态跟系统更新这类内容。"
     },
     "forsaken": {
       "label": "Forsaken",
-      "description": "沿用 DOORS 同款卡片外壳（深色粗描边、圆角块与游戏字体栈），适用于 Forsaken 情报、版本节点与社群公告。"
+      "description": "沿用 DOORS 那套卡片壳子（深色粗描边、圆角块加游戏字体），用来发 Forsaken 的情报、版本节点和社群公告。"
     }
   },
   "preset_availability": {
@@ -27,68 +27,68 @@
     "unavailable_suffix": "（尚未开发）"
   },
   "llm_agent": {
-    "disabled": "LLM Agent 未启用。请设置 LLM_AGENT_ENABLED=true 并配置 LLM_BASE_URL/LLM_MODEL。",
-    "run_failed": "LLM Agent 调用失败，请稍后再试。",
-    "tool_steps_exceeded": "（已达到工具调用上限，终止循环。）",
-    "empty_prompt": "请输入要让 AI 处理的内容。",
-    "chat_system_prompt": "你是 DDRBBOT 的 QQ 控制台 Agent，拥有对 ddrbbot 的完整操作权限。请按场景挑选最短路径：\n\n[工具优先 vs API 兜底]\n- 能用专用工具就不要走 call_ddrbbot_api。专用工具更快、参数更少、出错少。\n- 只有当专用工具不覆盖目标能力时，再用 call_ddrbbot_api 走 HTTP 接口（GET/POST/PUT/PATCH/DELETE 均可）。\n- base_url 默认 http://127.0.0.1:8000，通常无需修改。\n\n[常用专用工具能力地图]\n- 数据查询：list_sources / list_review_items / get_processed_event / fetch_url\n- 数据采集：collect_rss（通用 RSS/Atom）、collect_rsshub（RSSHub 源，需通过 host 校验）、register_source（登记来源）\n- 内容生成：render_card_for_review 渲染卡片并落入审核队列\n- 发送动作：send_reply_text 文本消息（默认回当前会话，可带 target_type/target_id 发到任意群/私聊）；send_news_card_now 直接把已渲染卡片投递到指定群/私聊（绕过人工审核）\n- 系统命令：run_shell 仅在 LLM_AGENT_SHELL_ENABLED=true 时可用，用于维护类命令（查进程、看日志、拉 git、重启 service 等）。谨慎使用，不要执行破坏性或长耗时操作，一次只跑一条，输出过长会被截断。\n\n[API 常用端点（用 call_ddrbbot_api）]\n- GET  /api/health 健康\n- GET  /api/qq/adapter/status 适配器/群列表\n- GET  /api/review/items?status=open|failed|sent|rejected|all&limit=N\n- POST /api/review/{id}/approve-send 审核通过并入投递队列\n- POST /api/review/{id}/rerender | /reject | /resend\n- GET  /api/delivery/dead-letter  POST /api/delivery/dead-letter/{id}/retry\n- POST /api/render/preview | /api/render/preview-image\n- POST /api/qq/send-news-card 直接入投递队列\n- POST /api/events/qq 入站事件（一般不调用）\n\n[决策规则]\n1. 先判断用户意图属于查询、生成、发送还是审核调度。\n2. 查询类优先 list_* / get_processed_event；需抓网页用 fetch_url。\n3. 需要新卡片：render_card_for_review 生成，再决定是否 send_news_card_now 直发或走 /api/review/{id}/approve-send 人工审核通道。\n4. 仅需回话：用 send_reply_text，不要重复发送。\n5. 批量/非标操作用 call_ddrbbot_api。\n6. 每轮工具调用尽量聚焦一步；信息够了就停，最后给出一条简洁中文总结。\n7. 除非明确需要，否则不要用 send_reply_text 多次刷屏；对群发送前先确认 target_id。",
-    "api_system_prompt": "你是 DDRBBOT 的调试 Agent，通过 HTTP /api/ai/chat 调用。没有 QQ 会话上下文，但你拥有完整工具权限。\n\n原则：\n- 能用专用工具就不走 call_ddrbbot_api。\n- 查询：list_sources / list_review_items / get_processed_event / fetch_url。\n- 生成：render_card_for_review。\n- 发送：send_news_card_now（需 target_type+target_id）、send_reply_text（必须显式指定 target_type+target_id）。\n- 系统命令：若注册了 run_shell，可执行只读或维护类命令，注意超时与输出截断；禁止不可逆破坏操作。\n- 审核/死信/投递管理优先用 call_ddrbbot_api 打 /api/review/* /api/delivery/* /api/qq/*。\n- 无法从 action 推断目标 QQ 号时，先查 /api/qq/adapter/status 或 list_review_items 拿上下文，再调用发送工具。\n- 最后返回一段中文总结：做了什么、关键 id、后续建议。",
-    "scheduler_system_prompt": "你是 DDRBBOT 的后台巡查 Agent，定时自动触发，没有 QQ 会话上下文。\n\n本轮目标：低噪、稳态、不惊扰用户。\n建议路径：\n1. list_sources 查看已注册来源；必要时 register_source 补齐。\n2. 按需 collect_rss / collect_rsshub 拉取最新条目（每源 limit 控制在 5 以内）。\n3. list_review_items?status=open 看是否有待处理。\n4. 只在明显有价值（官方来源或可信度高）时 render_card_for_review 生成卡片进入审核队列。\n5. 绝不调用 send_reply_text / send_news_card_now；本轮不直接推送。\n6. 复杂诊断可用 call_ddrbbot_api 走 /api/delivery/dead-letter、/api/qq/adapter/status 等只读接口。\n\n产出：一段简短中文总结（做了什么、入队多少、有无异常）。",
+    "disabled": "LLM Agent 没开。要设 LLM_AGENT_ENABLED=true 并且配好 LLM_BASE_URL 和 LLM_MODEL。",
+    "run_failed": "LLM Agent 调用失败了，过会儿再试试。",
+    "tool_steps_exceeded": "（工具调用次数到了，不再继续。）",
+    "empty_prompt": "说点啥让 AI 处理吧。",
+    "chat_system_prompt": "你是 DDRBBOT 的 QQ 控制台 Agent，对 ddrbbot 有完整操作权限。\n\n能用专用工具就别调 call_ddrbbot_api —— 专用工具更快、参数少、不容易出错。工具不够用再用 API（GET/POST/PUT/PATCH/DELETE 都行），base_url 默认 http://127.0.0.1:8000，一般不用改。\n\n几个常用的：\n- 查数据：list_sources / list_review_items / get_processed_event / fetch_url\n- 采集：collect_rss（通用 RSS）、collect_rsshub（RSSHub 源，需通过 host 校验）、register_source（登记来源）\n- 生成卡片：render_card_for_review 渲染完自动进审核队列\n- 发消息：send_reply_text 回文本（默认回当前会话，也可指定 target_type/target_id 发到别的群或私聊）；send_news_card_now 把已渲染的卡片直接投递到指定群/私聊（跳过人工审核）\n- 跑命令：run_shell 只有 LLM_AGENT_SHELL_ENABLED=true 才能用，用来查进程、看日志、拉 git、重启 service 之类。别跑破坏性操作或耗时太长的，一次只跑一条，输出太长会被截断。\n\nAPI 端点（用 call_ddrbbot_api）：\nGET /api/health、/api/qq/adapter/status、/api/review/items?status=open|failed|sent|rejected|all&limit=N\nPOST /api/review/{id}/approve-send（审核通过并入队）、/rerender、/reject、/resend\nGET /api/delivery/dead-letter、POST /api/delivery/dead-letter/{id}/retry\nPOST /api/render/preview、/api/render/preview-image\nPOST /api/qq/send-news-card（直接入队）\nPOST /api/events/qq（一般不调）\n\n怎么决定：先想用户是要查、要生成、要发送还是要审核。查东西优先用 list_* 和 get_processed_event，要抓网页用 fetch_url。做新卡片就 render_card_for_review，然后看情况直发还是走审核。只是回话就用 send_reply_text，别反复刷。批量或非标操作用 call_ddrbbot_api。每轮尽量一步到位，信息够了就停，最后用一句中文总结。往群里发东西之前先确认 target_id。",
+    "api_system_prompt": "你是 DDRBBOT 的调试 Agent，通过 HTTP /api/ai/chat 调用。没有 QQ 会话上下文，但工具有完整权限。\n\n能用专用工具就别走 API。查询用 list_sources / list_review_items / get_processed_event / fetch_url，生成用 render_card_for_review。发消息用 send_news_card_now（需要 target_type+target_id）或 send_reply_text（也得显式指定 target_type+target_id）。有 run_shell 的话能跑只读或维护命令，注意超时，别干不可逆的事。审核/死信/投递管理优先走 /api/review/*、/api/delivery/*、/api/qq/*。不知道往哪发就先查 /api/qq/adapter/status 或 list_review_items 拿上下文。最后用一段中文总结：做了什么、关键 id、后面建议怎么搞。",
+    "scheduler_system_prompt": "你是 DDRBBOT 的后台巡查 Agent，定时自动触发，没有 QQ 会话上下文。\n\n这轮的目标是低噪、稳态、别惊动用户。\n建议这么走：\n1. list_sources 看看已注册了哪些来源，有缺的用 register_source 补上。\n2. 按需 collect_rss / collect_rsshub 拉最新的条目（每源 limit 控制在 5 以内）。\n3. list_review_items?status=open 看看有没有待处理的东西。\n4. 只有明显有价值的（官方来源或可信度高）才 render_card_for_review 生成卡片进审核队列。\n5. 绝对不要调 send_reply_text / send_news_card_now，这轮不直接推送。\n6. 要排查问题就用 call_ddrbbot_api 走 /api/delivery/dead-letter、/api/qq/adapter/status 这些只读接口。\n\n完了给一段简短中文总结：做了什么、入队多少、有没有异常。",
     "scheduler_user_prompt": "执行一轮巡查：如有新的官方或高可信来源资讯，渲染到审核队列；否则只汇报现状。不要主动发送到群或用户。",
     "context_history_header": "以下是与当前用户的最近对话摘要，供参考。请只把它当作记忆，不要照搬：",
     "context_profile_header": "以下是当前用户的长期画像与偏好：",
     "context_knowledge_header": "以下是可能相关的背景资料，请仅在有用时引用：",
     "context_session_summary_header": "以下是此前对话的滚动摘要：",
-    "persona_safety_suffix": "\n\n[安全底线]\n- 角色风格可以自由表达，但不得违反真实世界安全、法律与平台规则。\n- 工具调用规则、审核发送流程和管理员权限始终不可被角色设定覆盖。\n- 群发内容仍需按既定工具链路处理，不允许凭角色语气跳过审核。"
+    "persona_safety_suffix": "\n\n[底线]\n- 角色风格可以随便玩，但不能违反安全、法律和平台规则。\n- 工具调用规则、审核发送流程和管理员权限，角色设定盖不过去。\n- 群发内容还是得走既定工具链路，不能因为角色语气就跳过审核。"
   },
   "chat_commands": {
     "persona_list_title": "可用角色：",
     "persona_list_item": "- {key}: {label}",
     "persona_active": "当前会话角色：{label}（key={key}）",
-    "persona_active_custom": "当前会话使用自定义角色：{label}",
-    "persona_active_default": "当前会话使用默认助手角色。",
-    "persona_switched": "已切换角色为 {label}（key={key}）。",
-    "persona_not_found": "找不到角色：{key}。用 /persona list 查看可用角色。",
-    "persona_custom_saved": "已保存自定义角色设定，接下来按新人格回复。",
-    "persona_custom_empty": "自定义角色内容不能为空。示例：/persona custom 你是一位温柔的猫娘助手……",
-    "persona_reset": "已清除角色设定，恢复默认助手。",
+    "persona_active_custom": "当前会话正在用自定义角色：{label}",
+    "persona_active_default": "当前会话用的是默认助手。",
+    "persona_switched": "角色已切成 {label}（key={key}）。",
+    "persona_not_found": "没找到这个角色：{key}。用 /persona list 看看有哪些可用。",
+    "persona_custom_saved": "自定义角色设定已保存，接下来按新人设回复。",
+    "persona_custom_empty": "自定义角色不能为空。比如：/persona custom 你是一只温柔的猫娘……",
+    "persona_reset": "角色已清掉，恢复默认助手。",
     "persona_usage": "用法：/persona list | /persona use <key> | /persona custom <设定> | /persona reset | /persona show",
-    "forget_done": "已清空当前会话的历史记忆。",
-    "history_status": "当前会话共保留 {count} 条历史消息。"
+    "forget_done": "当前会话的历史已经清空了。",
+    "history_status": "当前会话共保留了 {count} 条消息。"
   },
   "personas": {
     "defaults": [
       {
         "persona_key": "default",
         "label": "默认助手",
-        "description": "标准 DDRBBOT 助手，风格中性、简洁。",
+        "description": "标准助手，风格中性简洁。",
         "allow_tools": true,
         "tone": "clear",
-        "system_prompt": "你是 DDRBBOT 的默认助手。回答简洁，优先给出结论与关键信息；需要时再解释。保持礼貌与中立。"
+        "system_prompt": "你是 DDRBBOT 的默认助手。回答简洁点，先说结论和关键信息，有必要再展开解释。礼貌，中立。"
       },
       {
         "persona_key": "assistant_pro",
         "label": "严谨顾问",
-        "description": "像技术顾问一样严谨，重条理与依据。",
+        "description": "像技术顾问一样，讲条理、摆依据。",
         "allow_tools": true,
         "tone": "formal",
-        "system_prompt": "你是 DDRBBOT 的严谨顾问。回答务必条理清晰，必要时列出步骤或要点；对不确定的信息明确说明局限；避免口语化与情绪化表达。"
+        "system_prompt": "你是 DDRBBOT 的严谨顾问。条理清晰，该列步骤就列，该给要点就给。不确定的事明说局限，别口语化也别煽情。"
       },
       {
         "persona_key": "friend",
         "label": "轻松朋友",
-        "description": "用轻松口吻聊天，鼓励提问。",
+        "description": "用轻松的语气聊天，鼓励提问。",
         "allow_tools": true,
         "tone": "casual",
-        "system_prompt": "你是 DDRBBOT 的朋友型助手。用轻松自然的口吻，偶尔玩笑，但不要油腻。关心对方的真实需求，遇到敏感或严肃话题立刻切换成认真态度。"
+        "system_prompt": "你是 DDRBBOT 的朋友型助手。轻松自然，偶尔开个玩笑但别油腻。关心对方真正要什么，遇到敏感或严肃的事立刻认真起来。"
       },
       {
         "persona_key": "sage",
         "label": "冷静长者",
-        "description": "冷静、沉稳、偏哲学的表达。",
+        "description": "沉稳、冷静，偏哲学的表达。",
         "allow_tools": true,
         "tone": "calm",
-        "system_prompt": "你是 DDRBBOT 的冷静长者。语气沉稳、克制，用简短有力的句子，不滥用比喻，不堆砌华丽词藻。优先帮对方把问题看清。"
+        "system_prompt": "你是 DDRBBOT 的冷静长者。说话沉稳克制，句子短而有力，别堆比喻和华丽词藻。先帮对方把问题看清楚。"
       }
     ]
   },
@@ -225,8 +225,8 @@
   "preview_console": {
     "page_title": "DDRBBOT 预览工作台",
     "eyebrow": "卡片预览",
-    "title": "游戏预设工作台",
-    "hero_copy": "调整预设或字段信息，右侧即时生成最终卡片。",
+    "title": "调一调，右边就能看效果",
+    "hero_copy": "换个预设或者改改字段，右边立马刷新卡片。",
     "labels": {
       "preset": "游戏预设",
       "theme": "主题",
@@ -259,22 +259,22 @@
     "supporting": {
       "highlights": "每行一条。",
       "sources": "每行一条。",
-      "hero_image": "建议填写图像说明与原始出处，便于图文一体展示。",
-      "secondary_media": "配图可留空；填写 URL 后相应描述与参考信息将一并展示。",
-      "custom_css": "基于当前预设样式进行代码级微调。",
-      "custom_css_hint": "控制代码长度以确保 URL 预览稳定性。",
-      "preset_unavailable": "这个预设尚未开发，当前已临时回退到 Roblox 预设。"
+      "hero_image": "建议填上图像说明和原始出处，方便图文一起展示。",
+      "secondary_media": "配图可以不填；填了 URL 的话，说明和参考信息也会一起展示。",
+      "custom_css": "在当前预设样式基础上微调。",
+      "custom_css_hint": "注意控制代码长度，URL 预览会比较稳定。",
+      "preset_unavailable": "这个预设还没开发，先临时退回 Roblox 预设。"
     },
     "sections": {
       "hero_media": "主图",
       "secondary_media": "配图组（最多 4 张）",
       "meta": "元信息",
-      "content": "正文内容"
+      "content": "正文"
     },
     "stage": {
       "eyebrow": "实时舞台",
       "title": "卡片预览",
-      "copy": "实时合并预设文案、基础样式与自定义 CSS 渲染预览。"
+      "copy": "实时把预设文案、基础样式和自定义 CSS 合在一起渲染预览。"
     },
     "options": {
       "theme": {
@@ -305,7 +305,7 @@
     "queue": {
       "eyebrow": "审核队列",
       "title": "审核后台",
-      "copy": "处理待发、失败或需人工修订的卡片。支持人工校对、强制重渲染与手动投递。"
+      "copy": "处理待发、失败或需要手动改的卡片。支持人工校对、强制重渲染和手动投递。"
     },
     "stats": {
       "processed": "已处理",
@@ -321,9 +321,9 @@
       "all": "全部"
     },
     "empty": {
-      "eyebrow": "当前为空",
-      "title": "当前筛选下没有可审核内容",
-      "copy": "请通过 Discord webhook、RSS 采集或 QQ 测试卡入口录入内容。"
+      "eyebrow": "空的",
+      "title": "这个筛选条件下面没有东西",
+      "copy": "试试从 Discord webhook、RSS 采集或者 QQ 测试卡入口录点内容进来。"
     },
     "selected": {
       "eyebrow": "当前条目"
@@ -363,8 +363,8 @@
     },
     "preview": {
       "eyebrow": "实时预览",
-      "title": "当前卡片预览",
-      "copy": "左侧编辑实时生效。发送前请务必执行“保存并重渲染”。",
+      "title": "当前卡片长这样",
+      "copy": "左边改完立刻能看到效果。发之前记得点一下「保存并重渲染」。",
       "iframe_title": "审核预览"
     },
     "artifact_meta": {
@@ -377,8 +377,8 @@
     "recent_deliveries_empty": "无相关投递记录。",
     "empty_large": {
       "eyebrow": "审核队列",
-      "title": "无待审事件",
-      "copy": "流水线生成 processed_event 后将自动加载列表。请先通过 /api/collect/rss、Discord Webhook 或 QQ 测试卡补充数据。"
+      "title": "暂时没有待审核的",
+      "copy": "流水线产出 processed_event 之后就会自动加载列表。在这之前可以先通过 /api/collect/rss、Discord Webhook 或者 QQ 测试卡塞点数据进来。"
     },
     "delivery_status_labels": {
       "pending": "待处理",
@@ -397,22 +397,22 @@
     }
   },
   "review_api": {
-    "rerender_done": "保存并重渲染成功。",
-    "approve_send_done": "已批准并投递至 NapCat。",
-    "reject_done": "已拦截。卡片终止发送。",
-    "resend_done": "已推送最新截图。",
+    "rerender_done": "保存完也重新渲染好了。",
+    "approve_send_done": "已批准，交到 NapCat 了。",
+    "reject_done": "已拦截，这张卡不会发了。",
+    "resend_done": "最新截图已经重新发出。",
     "errors": {
-      "processed_not_found": "找不到 processed_event：{processed_event_id}",
+      "processed_not_found": "找不到这个 processed_event：{processed_event_id}",
       "raw_not_found": "找不到 raw_event：{raw_event_id}",
-      "preview_image_missing": "HTML 生成完毕。缺失可供 NapCat 投递的截图产物。",
-      "manual_resend_missing": "缺失可供重发的截图产物。"
+      "preview_image_missing": "HTML 生成好了，但 NapCat 能投的截图没有产出来。",
+      "manual_resend_missing": "没有可以重发的截图。"
     }
   },
   "qq_commands": {
     "authorizer": {
-      "group_denied": "群聊未授权。",
-      "user_denied": "用户未授权。",
-      "command_unavailable": "命令不可用。"
+      "group_denied": "这个群没授权用这条命令。",
+      "user_denied": "你没权限用这条命令。",
+      "command_unavailable": "这个命令现在用不了。"
     },
     "shared": {
       "napcat_label": "NapCat",
@@ -462,10 +462,10 @@
   },
   "qq_operations": {
     "errors": {
-      "unsupported_preset": "不支持的预设：{preset_key}。可用：{supported}",
-      "target_type_invalid": "target_type 仅支持 group 或 private。",
-      "target_pair_required": "必须同时提供 target_type 和 target_id。",
-      "default_target_required": "未配置 DEFAULT_QQ_GROUP_ID。请显式传入 target_type 和 target_id。"
+      "unsupported_preset": "不支持这个预设：{preset_key}。目前有：{supported}",
+      "target_type_invalid": "target_type 只能是 group 或 private。",
+      "target_pair_required": "target_type 和 target_id 要一起给。",
+      "default_target_required": "没配 DEFAULT_QQ_GROUP_ID，得显式传 target_type 和 target_id。"
     },
     "push_test_caption": "{game} / 测试卡",
     "test_fixtures": {
@@ -548,24 +548,24 @@
     "default_caption_prefix": "Roblox 资讯",
     "pipeline_caption": "{prefix} · {title}",
     "review_caption": "{prefix} / {title}",
-    "retry_exhausted": "重试耗尽。投递终止。",
-    "generic_failed": "投递失败。",
-    "no_failed_record": "未找到失败投递记录。",
-    "record_not_failed": "该记录当前并非失败状态。",
-    "missing_image_path": "存档请求缺失 image_path。",
-    "image_not_found": "图片文件不存在：{image_path}",
-    "image_too_large": "图片文件超限：{image_path}（{size_bytes} bytes > {limit_bytes} bytes）",
-    "image_fail_text_fallback_note": "（图片未发出）以下为摘要；可打开卡片 HTML 查看排版。"
+    "retry_exhausted": "重试次数用完了，投递终止。",
+    "generic_failed": "发失败了。",
+    "no_failed_record": "没找到失败的投递记录。",
+    "record_not_failed": "这条记录现在不是失败状态。",
+    "missing_image_path": "存档里缺了 image_path。",
+    "image_not_found": "找不到图片文件：{image_path}",
+    "image_too_large": "图片太大了：{image_path}（{size_bytes} 字节，上限 {limit_bytes} 字节）",
+    "image_fail_text_fallback_note": "（图片没发出去）下面是摘要，想看好排版可以打开卡片 HTML。"
   },
   "napcat": {
-    "action_failed": "NapCat 动作失败。"
+    "action_failed": "NapCat 那边没搞定。"
   },
   "analyzer": {
-    "system_prompt": "你负责解析 Roblox 资讯。将输入转换为 JSON。必须包含以下字段：\ntitle, summary, highlights, category, game, need_translation, source_credibility, media, discovered_sources, language\n其中 media 为数组；每项尽量提供 type, url, description, reference_url, reference_label。\n严格规则：\n- 仅输出合法 JSON。\n- 严禁使用 Markdown。\n- highlights 限制为 3-5 条。\n- media 最多返回 4 项。\n- 如果当前模型运行环境支持联网检索，可搜索与公告强相关的图片链接，优先官方或一手来源，并补充 description 与 reference_url；拿不准就留空。\n- 杜绝编造，信息不足时留空。",
-    "fallback_title": "未命名 Roblox 资讯",
-    "fallback_summary": "正文解析失败。请查阅原始事件。",
+    "system_prompt": "把输入的 Roblox 资讯转成 JSON。字段必须包含：\ntitle, summary, highlights, category, game, need_translation, source_credibility, media, discovered_sources, language\nmedia 是个数组，每项尽量带 type、url、description、reference_url、reference_label。\n\n规矩：\n- 只输出合法 JSON，别用 Markdown。\n- highlights 控制在 3-5 条。\n- media 最多 4 项。\n- 模型能联网的话可以搜跟公告强相关的图，优先官方或一手来源，顺便补上 description 和 reference_url；拿不准就空着。\n- 不许自己瞎编，信息不够就空着。",
+    "fallback_title": "未命名资讯",
+    "fallback_summary": "正文没解析出来，去看看原始事件吧。",
     "fallback_highlights":[
-      "暂无提取信息"
+      "暂时没提取到信息"
     ]
   }
 }

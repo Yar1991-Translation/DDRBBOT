@@ -15,8 +15,20 @@ from fastapi.staticfiles import StaticFiles
 from .analyzer import EventAnalyzer
 from .config import Settings, load_settings
 from .copybook import copy_dict, copy_format, copy_list, copy_text
-from .database import SQLiteRepository, _RAW_PATCH_MISSING
+from .database import SQLiteRepository
 from .delivery import DeliveryError, QQDeliveryService
+from .review_presenter import (
+    apply_review_edits,
+    build_review_detail,
+    build_review_list_item,
+    build_preview_link,
+    load_review_entities,
+    normalize_review_status,
+    review_preview_seed,
+    review_statuses,
+    select_review_item,
+    send_review_artifact,
+)
 from .models import (
     DiscordWebhookPayload,
     EnqueueResult,
@@ -62,7 +74,7 @@ from .qq.napcat import NapCatAdapter, normalize_inbound_event
 from .qq.operations import QQOperationsService
 from .qq.ws_client import NapCatWSClient, handle_inbound_event
 from .rendering import NewsCardRenderer
-from .rss import RSSCollector
+from .rss import RSSCollector, collect_and_enqueue_rss
 from .rsshub import validate_rsshub_feed_url
 from .services import AppServices
 from .logging_setup import configure_logging
@@ -316,17 +328,20 @@ def _register_routes(app: FastAPI) -> None:
         limit: int = 24,
     ) -> HTMLResponse:
         services = _services(request)
-        normalized_status = _normalize_review_status(status)
+        normalized_status = normalize_review_status(status)
         items = services.repository.list_processed_events(
-            delivery_statuses=_review_statuses(normalized_status),
+            delivery_statuses=review_statuses(normalized_status),
             limit=min(max(limit, 1), 50),
         )
-        selected = _select_review_item(items, processed_event_id)
+        raw_events_map = services.repository.get_raw_events_batch(
+            [item.raw_event_id for item in items]
+        )
+        selected = select_review_item(items, processed_event_id)
         review_items: list[dict[str, Any]] = []
         for item in items:
-            raw_event = services.repository.get_raw_event(item.raw_event_id)
+            raw_event = raw_events_map.get(item.raw_event_id)
             review_items.append(
-                _build_review_list_item(
+                build_review_list_item(
                     item,
                     source_name=raw_event.source_name
                     if raw_event
@@ -334,7 +349,7 @@ def _register_routes(app: FastAPI) -> None:
                     selected_id=selected.id if selected else None,
                 )
             )
-        selected_item = _build_review_detail(services, selected) if selected else None
+        selected_item = build_review_detail(services, selected) if selected else None
         html = services.renderer.render_review_panel(
             items=review_items,
             selected_item=selected_item,
@@ -354,17 +369,20 @@ def _register_routes(app: FastAPI) -> None:
         limit: int = 24,
     ) -> dict[str, Any]:
         services = _services(request)
-        normalized_status = _normalize_review_status(status)
+        normalized_status = normalize_review_status(status)
         items = services.repository.list_processed_events(
-            delivery_statuses=_review_statuses(normalized_status),
+            delivery_statuses=review_statuses(normalized_status),
             limit=min(max(limit, 1), 50),
         )
-        selected = _select_review_item(items, processed_event_id)
+        raw_events_map = services.repository.get_raw_events_batch(
+            [item.raw_event_id for item in items]
+        )
+        selected = select_review_item(items, processed_event_id)
         review_items: list[dict[str, Any]] = []
         for item in items:
-            raw_event = services.repository.get_raw_event(item.raw_event_id)
+            raw_event = raw_events_map.get(item.raw_event_id)
             review_items.append(
-                _build_review_list_item(
+                build_review_list_item(
                     item,
                     source_name=raw_event.source_name
                     if raw_event
@@ -372,7 +390,7 @@ def _register_routes(app: FastAPI) -> None:
                     selected_id=selected.id if selected else None,
                 )
             )
-        selected_detail = _build_review_detail(services, selected) if selected else None
+        selected_detail = build_review_detail(services, selected) if selected else None
         return {
             "ok": True,
             "status_filter": normalized_status,
@@ -394,7 +412,7 @@ def _register_routes(app: FastAPI) -> None:
                     processed_event_id=processed_event_id,
                 ),
             )
-        return {"ok": True, "item": _build_review_detail(services, processed_event)}
+        return {"ok": True, "item": build_review_detail(services, processed_event)}
 
     @app.post("/api/review/{processed_event_id}/rerender")
     async def review_rerender(
@@ -403,8 +421,8 @@ def _register_routes(app: FastAPI) -> None:
         request: Request,
     ) -> dict[str, Any]:
         services = _services(request)
-        raw_event, processed_event = _load_review_entities(services, processed_event_id)
-        processed_event = _apply_review_edits(services, raw_event, processed_event, payload)
+        raw_event, processed_event = load_review_entities(services, processed_event_id)
+        processed_event = apply_review_edits(services, raw_event, processed_event, payload)
         try:
             artifact = await services.renderer.render(raw_event, processed_event, theme=payload.theme)
         except Exception as exc:
@@ -434,8 +452,8 @@ def _register_routes(app: FastAPI) -> None:
         request: Request,
     ) -> dict[str, Any]:
         services = _services(request)
-        raw_event, processed_event = _load_review_entities(services, processed_event_id)
-        processed_event = _apply_review_edits(services, raw_event, processed_event, payload)
+        raw_event, processed_event = load_review_entities(services, processed_event_id)
+        processed_event = apply_review_edits(services, raw_event, processed_event, payload)
         try:
             artifact = await services.renderer.render(raw_event, processed_event, theme=payload.theme)
         except Exception as exc:
@@ -453,7 +471,7 @@ def _register_routes(app: FastAPI) -> None:
                 ),
             )
         try:
-            delivery = await _send_review_artifact(
+            delivery = await send_review_artifact(
                 services,
                 processed_event=processed_event,
                 raw_event=raw_event,
@@ -517,7 +535,7 @@ def _register_routes(app: FastAPI) -> None:
         request: Request,
     ) -> dict[str, Any]:
         services = _services(request)
-        raw_event, processed_event = _load_review_entities(services, processed_event_id)
+        raw_event, processed_event = load_review_entities(services, processed_event_id)
         artifact = services.repository.get_latest_render_artifact(processed_event.id)
         if artifact is None or not artifact.image_path:
             raise HTTPException(
@@ -528,7 +546,7 @@ def _register_routes(app: FastAPI) -> None:
                 ),
             )
         try:
-            delivery = await _send_review_artifact(
+            delivery = await send_review_artifact(
                 services,
                 processed_event=processed_event,
                 raw_event=raw_event,
@@ -568,26 +586,18 @@ def _register_routes(app: FastAPI) -> None:
         services = _services(request)
         collector = RSSCollector()
         events = await collector.collect(payload.source_name, payload.feed_url, limit=payload.limit)
-        accepted = 0
-        deduplicated = 0
-        queued_event_ids: list[str] = []
-        for event in events:
-            inserted = services.repository.insert_raw_event(event)
-            if not inserted:
-                deduplicated += 1
-                continue
-            accepted += 1
-            queued_event_ids.append(event.id)
-            await services.pipeline.enqueue(event.id)
-        services.repository.touch_source_feed(
-            source_type="rss",
+        result = await collect_and_enqueue_rss(
+            events,
+            insert_raw_event=services.repository.insert_raw_event,
+            enqueue=services.pipeline.enqueue,
+            touch_source_feed=services.repository.touch_source_feed,
             source_name=payload.source_name,
             feed_url=payload.feed_url,
         )
         return RSSCollectResponse(
-            accepted=accepted,
-            deduplicated=deduplicated,
-            queued_event_ids=queued_event_ids,
+            accepted=result["accepted"],
+            deduplicated=result["deduplicated"],
+            queued_event_ids=result["queued_event_ids"],
         )
 
     @app.post("/api/collect/rsshub", response_model=RSSCollectResponse)
@@ -604,32 +614,19 @@ def _register_routes(app: FastAPI) -> None:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         collector = RSSCollector()
         events = await collector.collect(payload.source_name, payload.feed_url, limit=payload.limit)
-        accepted = 0
-        deduplicated = 0
-        queued_event_ids: list[str] = []
-        for event in events:
-            base = dict(event.raw_payload) if event.raw_payload else {}
-            event.raw_payload = {
-                **base,
-                "collector": "rsshub",
-                "feed_url": payload.feed_url,
-            }
-            inserted = services.repository.insert_raw_event(event)
-            if not inserted:
-                deduplicated += 1
-                continue
-            accepted += 1
-            queued_event_ids.append(event.id)
-            await services.pipeline.enqueue(event.id)
-        services.repository.touch_source_feed(
-            source_type="rss",
+        result = await collect_and_enqueue_rss(
+            events,
+            insert_raw_event=services.repository.insert_raw_event,
+            enqueue=services.pipeline.enqueue,
+            touch_source_feed=services.repository.touch_source_feed,
             source_name=payload.source_name,
             feed_url=payload.feed_url,
+            rsshub=True,
         )
         return RSSCollectResponse(
-            accepted=accepted,
-            deduplicated=deduplicated,
-            queued_event_ids=queued_event_ids,
+            accepted=result["accepted"],
+            deduplicated=result["deduplicated"],
+            queued_event_ids=result["queued_event_ids"],
         )
 
     @app.get("/api/sources")
@@ -959,43 +956,24 @@ def _register_routes(app: FastAPI) -> None:
 async def _startup_selfcheck(services: AppServices) -> None:
     logger = logging.getLogger(__name__)
     settings = services.settings
-    napcat_connected = False
-    bot_uin: Any = None
-    bot_nickname: Any = None
-    napcat_version: Any = None
-    default_group_found: bool | None = None
-    groups_count: int | None = None
-    try:
-        napcat_connected = await services.bot_adapter.health_check()
-    except Exception as exc:  # pragma: no cover - network dependent
-        logger.error("Selfcheck NapCat health_check failed: %s", exc)
-    if napcat_connected:
-        try:
-            info = await services.bot_adapter.get_login_info()
-            bot_uin = info.get("user_id")
-            bot_nickname = info.get("nickname")
-        except Exception as exc:  # pragma: no cover
-            logger.warning("Selfcheck get_login_info failed: %s", exc)
-        try:
-            ver = await services.bot_adapter.get_version_info()
-            napcat_version = ver.get("app_name") or ver.get("version")
-        except Exception as exc:  # pragma: no cover
-            logger.warning("Selfcheck get_version_info failed: %s", exc)
-        if settings.default_qq_group_id:
-            try:
-                groups = await services.bot_adapter.get_group_list()
-                groups_count = len(groups)
-                target = settings.default_qq_group_id
-                default_group_found = any(
-                    str(g.get("group_id") or "") == target for g in groups
-                )
-                if not default_group_found:
-                    logger.warning(
-                        "Selfcheck default group %s is not found in NapCat group list.",
-                        target,
-                    )
-            except Exception as exc:  # pragma: no cover
-                logger.warning("Selfcheck get_group_list failed: %s", exc)
+    snapshot = await services.operations_service.adapter_snapshot()
+    napcat_connected = snapshot.get("connected", False)
+    login_info = snapshot.get("login_info", {})
+    version_info = snapshot.get("version_info", {})
+    bot_uin = login_info.get("user_id")
+    bot_nickname = login_info.get("nickname")
+    napcat_version = version_info.get("app_name") or version_info.get("version")
+    groups_count = snapshot.get("groups_count")
+    default_group_found = snapshot.get("default_group_found")
+    if (
+        napcat_connected
+        and settings.default_qq_group_id
+        and default_group_found is False
+    ):
+        logger.warning(
+            "Selfcheck default group %s is not found in NapCat group list.",
+            settings.default_qq_group_id,
+        )
     stats = services.repository.get_stats()
     logger.info(
         "Startup selfcheck: napcat_connected=%s bot_uin=%s nickname=%s version=%s "
@@ -1053,408 +1031,6 @@ def _preview_models_from_payload(payload: RenderPreviewRequest) -> tuple[RawEven
         published_at=payload.published_at,
     )
     return raw_event, processed_event
-
-
-def _review_statuses(status: str) -> tuple[str, ...] | None:
-    mapping = {
-        "open": ("pending", "skipped", "review_pending", "failed", "approved"),
-        "failed": ("failed",),
-        "sent": ("sent",),
-        "rejected": ("rejected",),
-        "all": None,
-    }
-    return mapping.get(status, mapping["open"])
-
-
-def _normalize_review_status(status: str) -> str:
-    if status in {"open", "failed", "sent", "rejected", "all"}:
-        return status
-    return "open"
-
-
-def _select_review_item(
-    items: list[ProcessedEvent],
-    processed_event_id: str | None,
-) -> ProcessedEvent | None:
-    if not items:
-        return None
-    if processed_event_id:
-        for item in items:
-            if item.id == processed_event_id:
-                return item
-    return items[0]
-
-
-def _build_review_list_item(
-    processed_event: ProcessedEvent,
-    *,
-    source_name: str,
-    selected_id: str | None,
-) -> dict[str, Any]:
-    return {
-        "id": processed_event.id,
-        "title": processed_event.title,
-        "game": processed_event.game,
-        "source_name": source_name,
-        "published_at": processed_event.published_at.strftime("%m-%d %H:%M"),
-        "delivery_status_label": _review_delivery_status_label(processed_event.delivery_status),
-        "delivery_status_tone": _review_delivery_status_tone(processed_event.delivery_status),
-        "render_status": processed_event.render_status,
-        "render_status_label": _review_render_status_label(processed_event.render_status),
-        "category_label": _review_category_label(processed_event.category),
-        "active": processed_event.id == selected_id,
-    }
-
-
-def _build_review_detail(services: AppServices, processed_event: ProcessedEvent) -> dict[str, Any]:
-    raw_event = services.repository.get_raw_event(processed_event.raw_event_id)
-    latest_artifact = services.repository.get_latest_render_artifact(processed_event.id)
-    delivery_records = services.repository.list_delivery_records(
-        processed_event_id=processed_event.id,
-        limit=5,
-    )
-    source_name = raw_event.source_name if raw_event else (
-        processed_event.game or copy_text("rendering.unknown_source", "Unknown Source")
-    )
-    preview_seed = _review_preview_seed(
-        raw_event=raw_event,
-        processed_event=processed_event,
-        theme=latest_artifact.theme if latest_artifact else "light",
-    )
-    structured_meta = copy_format(
-        "review_panel.supporting.structured_meta",
-        "语言 {language} · 可信度 {credibility} · {translation}",
-        language=processed_event.language,
-        credibility=_review_credibility_label(processed_event.source_credibility),
-        translation=copy_text("review_panel.supporting.translation_true", "含翻译")
-        if processed_event.need_translation
-        else copy_text("review_panel.supporting.translation_false", "原文可直接使用"),
-    )
-    return {
-        "id": processed_event.id,
-        "title": processed_event.title,
-        "summary": processed_event.summary,
-        "highlights_text": "\n".join(processed_event.highlights),
-        "category": processed_event.category,
-        "game": processed_event.game or "",
-        "theme": latest_artifact.theme if latest_artifact else "light",
-        "source_name": source_name,
-        "channel_name": raw_event.channel_name if raw_event else None,
-        "author": raw_event.author if raw_event else None,
-        "published_at": processed_event.published_at.strftime("%Y-%m-%d %H:%M UTC"),
-        "source_credibility": processed_event.source_credibility,
-        "source_credibility_label": _review_credibility_label(processed_event.source_credibility),
-        "need_translation": processed_event.need_translation,
-        "language": processed_event.language,
-        "render_status": processed_event.render_status,
-        "render_status_label": _review_render_status_label(processed_event.render_status),
-        "delivery_status_label": _review_delivery_status_label(processed_event.delivery_status),
-        "delivery_status_tone": _review_delivery_status_tone(processed_event.delivery_status),
-        "structured_meta": structured_meta,
-        "discovered_sources": processed_event.discovered_sources,
-        "raw_content": raw_event.content
-        if raw_event
-        else copy_text("rendering.raw_event_missing", "Raw event payload is missing."),
-        "raw_payload_json": json.dumps(
-            raw_event.raw_payload if raw_event else {},
-            ensure_ascii=False,
-            indent=2,
-            default=str,
-        ),
-        "latest_html_path": latest_artifact.html_path if latest_artifact else None,
-        "latest_image_path": latest_artifact.image_path if latest_artifact else None,
-        "preview_link": _build_preview_link(preview_seed, processed_event),
-        "preview_seed_json": json.dumps(preview_seed, ensure_ascii=False),
-        "recent_deliveries": [
-            {
-                "trace_id": record.trace_id,
-                "status": record.status,
-                "target_type": record.target_type,
-                "target_id": record.target_id,
-                "updated_at": record.updated_at.strftime("%Y-%m-%d %H:%M:%S"),
-            }
-            for record in delivery_records
-        ],
-        "raw_event_id": processed_event.raw_event_id,
-        "preset_key": preview_seed.get("preset_key") or "",
-        "orientation": preview_seed.get("orientation") or "vertical",
-        "custom_css": preview_seed.get("custom_css") or "",
-        "media": [m.model_dump() for m in processed_event.media],
-    }
-
-
-def _load_review_entities(
-    services: AppServices,
-    processed_event_id: str,
-) -> tuple[RawEvent, ProcessedEvent]:
-    processed_event = services.repository.get_processed_event(processed_event_id)
-    if processed_event is None:
-        raise HTTPException(
-            status_code=404,
-            detail=copy_format(
-                "review_api.errors.processed_not_found",
-                "Processed event not found: {processed_event_id}",
-                processed_event_id=processed_event_id,
-            ),
-        )
-    raw_event = services.repository.get_raw_event(processed_event.raw_event_id)
-    if raw_event is None:
-        raise HTTPException(
-            status_code=404,
-            detail=copy_format(
-                "review_api.errors.raw_not_found",
-                "Raw event not found: {raw_event_id}",
-                raw_event_id=processed_event.raw_event_id,
-            ),
-        )
-    return raw_event, processed_event
-
-
-def _apply_review_edits(
-    services: AppServices,
-    raw_event: RawEvent,
-    processed_event: ProcessedEvent,
-    payload: ReviewEditRequest,
-) -> ProcessedEvent:
-    fs = payload.model_fields_set
-    title = payload.title.strip() or processed_event.title
-    summary = payload.summary.strip() or processed_event.summary
-    highlights = [item.strip() for item in payload.highlights if item.strip()]
-    if not highlights:
-        highlights = processed_event.highlights or copy_list(
-            "rendering.fallback_review_highlights",
-            ["待补充重点摘要。"],
-        )
-    category = payload.category or processed_event.category
-    game = (payload.game or "").strip()
-    need_translation_update: bool | None = None
-    if "need_translation" in fs:
-        need_translation_update = bool(payload.need_translation)
-    source_credibility_update: str | None = None
-    if "source_credibility" in fs:
-        sc = (payload.source_credibility or "").strip()
-        source_credibility_update = sc or processed_event.source_credibility
-    media_update = list(payload.media or []) if "media" in fs else None
-    discovered_update: list[str] | None = None
-    if "discovered_sources" in fs:
-        discovered_update = [
-            line.strip()
-            for line in (payload.discovered_sources or [])
-            if isinstance(line, str) and line.strip()
-        ]
-    services.repository.update_processed_event_review_fields(
-        processed_event.id,
-        title=title,
-        summary=summary,
-        highlights=highlights,
-        category=category,
-        game=game,
-        delivery_status="review_pending",
-        need_translation=need_translation_update,
-        source_credibility=source_credibility_update,
-        media=media_update,
-        discovered_sources=discovered_update,
-    )
-    processed_event.title = title
-    processed_event.summary = summary
-    processed_event.highlights = highlights
-    processed_event.category = category
-    processed_event.game = game or None
-    processed_event.delivery_status = "review_pending"
-    if need_translation_update is not None:
-        processed_event.need_translation = need_translation_update
-    if source_credibility_update is not None:
-        processed_event.source_credibility = source_credibility_update
-    if media_update is not None:
-        processed_event.media = media_update
-    if discovered_update is not None:
-        processed_event.discovered_sources = discovered_update
-    raw_payload_merge: dict[str, Any] = {}
-    if "preset_key" in fs:
-        raw_payload_merge["preset_key"] = (payload.preset_key or "").strip()
-    if "orientation" in fs:
-        raw_payload_merge["orientation"] = payload.orientation or "vertical"
-    if "custom_css" in fs:
-        raw_payload_merge["custom_css"] = payload.custom_css or ""
-    ch: Any = _RAW_PATCH_MISSING
-    au: Any = _RAW_PATCH_MISSING
-    if "channel_name" in fs:
-        ch = payload.channel_name
-    if "author" in fs:
-        au = payload.author
-    if raw_payload_merge or ch is not _RAW_PATCH_MISSING or au is not _RAW_PATCH_MISSING:
-        services.repository.patch_raw_event(
-            raw_event.id,
-            channel_name=ch,
-            author=au,
-            raw_payload_merge=raw_payload_merge if raw_payload_merge else None,
-        )
-        if raw_payload_merge:
-            raw_event.raw_payload.update(raw_payload_merge)
-        if ch is not _RAW_PATCH_MISSING:
-            raw_event.channel_name = ch
-        if au is not _RAW_PATCH_MISSING:
-            raw_event.author = au
-    return processed_event
-
-
-def _review_preview_seed(
-    *,
-    raw_event: RawEvent | None,
-    processed_event: ProcessedEvent,
-    theme: str,
-) -> dict[str, Any]:
-    preset_key = ""
-    orientation = "vertical"
-    custom_css = ""
-    if raw_event:
-        preset_key = str(raw_event.raw_payload.get("preset_key") or "")
-        orientation = str(raw_event.raw_payload.get("orientation") or "vertical")
-        if orientation not in {"vertical", "horizontal"}:
-            orientation = "vertical"
-        custom_css = str(raw_event.raw_payload.get("custom_css") or "")
-    return {
-        "source_name": raw_event.source_name
-        if raw_event
-        else (processed_event.game or copy_text("rendering.preview_source", "Preview Source")),
-        "channel_name": raw_event.channel_name if raw_event and raw_event.channel_name else "",
-        "author": raw_event.author
-        if raw_event and raw_event.author
-        else copy_text("rendering.unknown_author", "Unknown"),
-        "source_credibility": processed_event.source_credibility,
-        "need_translation": processed_event.need_translation,
-        "hero_image_url": processed_event.media[0].url if processed_event.media else "",
-        "hero_image_description": processed_event.media[0].description if processed_event.media else "",
-        "hero_image_reference_url": processed_event.media[0].reference_url if processed_event.media else "",
-        "hero_image_reference_label": processed_event.media[0].reference_label if processed_event.media else "",
-        "discovered_sources": processed_event.discovered_sources,
-        "preset_key": preset_key,
-        "orientation": orientation,
-        "custom_css": custom_css,
-        "theme": theme,
-    }
-
-
-def _build_preview_link(preview_seed: dict[str, Any], processed_event: ProcessedEvent) -> str:
-    params = {
-        "title": processed_event.title,
-        "summary": processed_event.summary,
-        "highlights": "\n".join(processed_event.highlights),
-        "category": processed_event.category,
-        "theme": preview_seed.get("theme") or "light",
-        "preset_key": preview_seed.get("preset_key") or "",
-        "orientation": preview_seed.get("orientation") or "vertical",
-        "custom_css": preview_seed.get("custom_css") or "",
-        "game": processed_event.game or "",
-        "source_name": preview_seed.get("source_name")
-        or copy_text("rendering.preview_source", "Preview Source"),
-        "channel_name": preview_seed.get("channel_name") or "",
-        "author": preview_seed.get("author") or "",
-        "source_credibility": preview_seed.get("source_credibility") or "unverified",
-        "hero_image_url": preview_seed.get("hero_image_url") or "",
-        "hero_image_description": preview_seed.get("hero_image_description") or "",
-        "hero_image_reference_url": preview_seed.get("hero_image_reference_url") or "",
-        "hero_image_reference_label": preview_seed.get("hero_image_reference_label") or "",
-        "discovered_sources": "\n".join(preview_seed.get("discovered_sources") or []),
-        "need_translation": "true" if preview_seed.get("need_translation") else "false",
-    }
-    return f"/preview/md3/card?{urlencode(params)}"
-
-
-async def _send_review_artifact(
-    services: AppServices,
-    *,
-    processed_event: ProcessedEvent,
-    raw_event: RawEvent,
-    image_path: str,
-    action: str,
-    target_type: str | None,
-    target_id: str | None,
-) -> dict[str, Any]:
-    caption_prefix = processed_event.game or raw_event.source_name
-    caption = copy_format(
-        "delivery.review_caption",
-        "{prefix} / {title}",
-        prefix=caption_prefix,
-        title=processed_event.title,
-    )
-    trace_id = (
-        f"review:{action}:{processed_event.id}:{target_type or 'default'}:"
-        f"{target_id or services.settings.default_qq_group_id or 'unset'}:{utc_now().timestamp():.6f}"
-    )
-    return await services.operations_service.send_news_card(
-        image_path=image_path,
-        caption=caption[:120],
-        trace_id=trace_id,
-        processed_event_id=processed_event.id,
-        target_type=target_type,
-        target_id=target_id,
-    )
-
-
-def _review_delivery_status_label(status: str) -> str:
-    mapping = copy_dict(
-        "review_panel.delivery_status_labels",
-        {
-            "pending": "待处理",
-            "skipped": "待审核",
-            "review_pending": "待审核",
-            "approved": "已批准",
-            "sent": "已发送",
-            "failed": "发送失败",
-            "rejected": "已拒绝",
-        },
-    )
-    return mapping.get(status, status)
-
-
-def _review_delivery_status_tone(status: str) -> str:
-    if status in {"sent"}:
-        return "sent"
-    if status in {"failed", "rejected"}:
-        return "failed"
-    return "pending"
-
-
-def _review_category_label(category: str) -> str:
-    mapping = copy_dict(
-        "rendering.category_labels",
-        {
-            "maintenance": "通知内容",
-            "patch": "更新内容",
-            "teaser": "预告内容",
-            "announcement": "公告内容",
-        },
-    )
-    return mapping.get(category, category)
-
-
-def _review_credibility_label(credibility: str) -> str:
-    mapping = copy_dict(
-        "rendering.credibility_labels",
-        {
-            "official": "官方来源",
-            "community": "社区来源",
-            "unverified": "待核实",
-        },
-    )
-    return mapping.get(credibility, credibility)
-
-
-def _review_render_status_label(status: str) -> str:
-    mapping = copy_dict(
-        "rendering.render_status_labels",
-        {
-            "pending": "待渲染",
-            "html_ready": "HTML 就绪",
-            "image_ready": "图片就绪",
-            "failed": "渲染失败",
-            "skipped": "已跳过",
-        },
-    )
-    return mapping.get(status, status)
-
-
 def _split_multiline(value: str) -> list[str]:
     return [line.strip() for line in value.splitlines() if line.strip()]
 

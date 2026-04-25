@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from time import struct_time
+from typing import Awaitable, Callable
 
 import feedparser
 
@@ -49,3 +50,31 @@ class RSSCollector:
         if value is None:
             return utc_now()
         return datetime(*value[:6], tzinfo=timezone.utc)
+
+
+async def collect_and_enqueue_rss(
+    events: list[RawEvent],
+    *,
+    insert_raw_event: Callable[[RawEvent], bool],
+    enqueue: Callable[[str], Awaitable[None]],
+    touch_source_feed: Callable[..., None],
+    source_name: str,
+    feed_url: str,
+    rsshub: bool = False,
+) -> dict[str, int | list[str]]:
+    accepted = 0
+    deduplicated = 0
+    queued_event_ids: list[str] = []
+    for event in events:
+        if rsshub:
+            base = dict(event.raw_payload) if event.raw_payload else {}
+            event.raw_payload = {**base, "collector": "rsshub", "feed_url": feed_url}
+        inserted = insert_raw_event(event)
+        if not inserted:
+            deduplicated += 1
+            continue
+        accepted += 1
+        queued_event_ids.append(event.id)
+        await enqueue(event.id)
+    touch_source_feed(source_type="rss", source_name=source_name, feed_url=feed_url)
+    return {"accepted": accepted, "deduplicated": deduplicated, "queued_event_ids": queued_event_ids}

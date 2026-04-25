@@ -19,7 +19,8 @@ from ..models import (
     RSSHubCollectRequest,
 )
 from ..rendering import NewsCardRenderer
-from ..rss import RSSCollector
+from ..review_presenter import review_statuses
+from ..rss import RSSCollector, collect_and_enqueue_rss
 from ..rsshub import validate_rsshub_feed_url
 from ..utils import make_external_id, utc_now
 from .agent import AgentContext
@@ -429,8 +430,9 @@ def _tool_list_sources(repository: SQLiteRepository) -> ToolHandler:
 
 
 def _tool_list_review_items(repository: SQLiteRepository) -> ToolHandler:
+    base = review_statuses("open")
     status_map = {
-        "open": ("pending", "skipped", "review_pending", "failed", "approved", "queued"),
+        "open": base + ("queued",) if base else ("queued",),
         "failed": ("failed",),
         "sent": ("sent",),
         "rejected": ("rejected",),
@@ -542,30 +544,18 @@ def _tool_collect_rss(
             events = await RSSCollector().collect(source_name, feed_url, limit=max(1, min(limit, 20)))
         except Exception as exc:
             return {"ok": False, "error": f"collect_failed: {exc}"}
-        accepted: list[str] = []
-        deduplicated = 0
-        for event in events:
-            if rsshub:
-                base = dict(event.raw_payload) if event.raw_payload else {}
-                event.raw_payload = {**base, "collector": "rsshub", "feed_url": feed_url}
-            inserted = repository.insert_raw_event(event)
-            if not inserted:
-                deduplicated += 1
-                continue
-            accepted.append(event.id)
-            await pipeline_enqueue(event.id)
-        repository.touch_source_feed(
-            source_type="rss",
+        result = await collect_and_enqueue_rss(
+            events,
+            insert_raw_event=repository.insert_raw_event,
+            enqueue=pipeline_enqueue,
+            touch_source_feed=repository.touch_source_feed,
             source_name=source_name,
             feed_url=feed_url,
+            rsshub=rsshub,
         )
         return {
             "ok": True,
-            "data": {
-                "accepted": len(accepted),
-                "deduplicated": deduplicated,
-                "queued_event_ids": accepted,
-            },
+            "data": result,
         }
 
     return handler
