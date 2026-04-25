@@ -9,3 +9,4 @@ artifacts/
 .env.*
 !.env.example
 .cursor/
+CLAUDE.md
