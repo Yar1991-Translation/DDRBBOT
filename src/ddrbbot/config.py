@@ -71,6 +71,7 @@ class Settings:
     google_custom_search_api_key: str | None
     google_custom_search_engine_id: str | None
     bing_search_api_key: str | None
+    llm_provider_seeds_json: str | None
 
 
 def load_settings() -> Settings:
@@ -143,4 +144,5 @@ def load_settings() -> Settings:
             os.getenv("GOOGLE_CUSTOM_SEARCH_ENGINE_ID") or None
         ),
         bing_search_api_key=os.getenv("BING_SEARCH_API_KEY") or None,
+        llm_provider_seeds_json=os.getenv("LLM_PROVIDER_SEEDS_JSON") or None,
     )

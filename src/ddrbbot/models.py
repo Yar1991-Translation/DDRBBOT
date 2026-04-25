@@ -204,6 +204,28 @@ class AIChatRequest(BaseModel):
     reset_session: bool = False
 
 
+class ProviderConfig(BaseModel):
+    """Runtime provider config returned by ProviderStore."""
+    key: str
+    label: str = ""
+    base_url: str = ""
+    api_key: str = ""
+    model: str = ""
+    is_active: bool = False
+
+
+class LLMProviderRecord(BaseModel):
+    """Database row for llm_providers table."""
+    id: str
+    label: str = ""
+    base_url: str = ""
+    api_key: str = ""
+    model: str = ""
+    is_active: bool = False
+    created_at: str = ""
+    updated_at: str = ""
+
+
 class ChatSession(BaseModel):
     id: str = Field(default_factory=new_id)
     session_key: str

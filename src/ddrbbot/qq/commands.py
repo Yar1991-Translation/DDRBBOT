@@ -15,6 +15,7 @@ from ..llm_agent import (
     ChatTurnRequest,
     LLMAgent,
     PersonaStore,
+    ProviderStore,
 )
 from ..models import CustomPersonaPayload, QQInboundEvent
 from ..pipeline import PipelineCoordinator
@@ -98,6 +99,7 @@ class QQCommandRouter:
         llm_agent: LLMAgent | None = None,
         chat_service: ChatService | None = None,
         persona_store: PersonaStore | None = None,
+        provider_store: ProviderStore | None = None,
     ) -> None:
         self.settings = settings
         self.repository = repository
@@ -107,6 +109,7 @@ class QQCommandRouter:
         self.llm_agent = llm_agent
         self.chat_service = chat_service
         self.persona_store = persona_store
+        self.provider_store = provider_store
         self.authorizer = QQCommandAuthorizer(settings)
 
     async def dispatch(self, event: QQInboundEvent) -> QQCommandDispatchResult:
@@ -154,6 +157,13 @@ class QQCommandRouter:
                     event,
                     "forget",
                     self._handle_forget_command,
+                )
+            if lowered == "/switch" or lowered.startswith("/switch "):
+                body = normalized.split(" ", 1)[1].strip() if " " in normalized else ""
+                return await self._dispatch_admin(
+                    event,
+                    "switch",
+                    lambda inbound: self._handle_switch_command(inbound, body),
                 )
             return QQCommandDispatchResult(detail="unknown_command")
 
@@ -492,6 +502,185 @@ class QQCommandRouter:
         if event.user_id:
             return "private", event.user_id
         return None, None
+
+    async def _handle_switch_command(
+        self,
+        event: QQInboundEvent,
+        body: str,
+    ) -> QQCommandDispatchResult:
+        if self.provider_store is None:
+            return await self._send_text(
+                event,
+                text=copy_text("switch.not_available", "Provider 切换功能未启用。"),
+                detail="provider_store_unavailable",
+            )
+        body = body.strip()
+        lowered = body.casefold()
+        parts = body.split()
+        parts_lower = lowered.split()
+
+        # /switch key <provider> <api_key>
+        if parts_lower[:1] == ["key"] and len(parts) >= 3:
+            provider_key = parts[1].casefold()
+            api_key = " ".join(parts[2:])
+            ok = self.provider_store.update_api_key(provider_key, api_key)
+            if not ok:
+                return await self._send_text(
+                    event,
+                    text=copy_text("switch.key_not_found",
+                                   "Provider {key} 不存在，请先用 /switch add 添加。",
+                                   key=provider_key),
+                    detail="key_set_failed",
+                )
+            return await self._send_text(
+                event,
+                text=copy_text("switch.key_set", "已为 {key} 设置 API Key。",
+                               key=provider_key),
+                detail="key_set",
+            )
+
+        # /switch models <provider>
+        if parts_lower[:1] == ["models"] and len(parts) >= 2:
+            provider_key = parts[1].casefold()
+            provider = self.provider_store.get_provider(provider_key)
+            if provider is None:
+                return await self._send_text(
+                    event,
+                    text=copy_text("switch.not_found", "Provider {key} 不存在。",
+                                   key=provider_key),
+                    detail="not_found",
+                )
+            if not provider.api_key:
+                return await self._send_text(
+                    event,
+                    text=copy_text("switch.models_need_key",
+                                   "{key} 没有 API Key，请先用 /switch key {key} <key> 设置。",
+                                   key=provider_key),
+                    detail="no_api_key",
+                )
+            try:
+                models = await ProviderStore.fetch_models_via_http(
+                    provider.base_url, provider.api_key)
+            except Exception as exc:
+                return await self._send_text(
+                    event,
+                    text=copy_text("switch.models_failed",
+                                   "获取 {key} 模型列表失败：{error}",
+                                   key=provider_key, error=str(exc)),
+                    detail="models_failed",
+                )
+            if not models:
+                return await self._send_text(
+                    event,
+                    text=copy_text("switch.models_empty",
+                                   "{key} 未返回任何模型。", key=provider_key),
+                    detail="models_empty",
+                )
+            header = copy_text("switch.models_header",
+                               "=== {key} 可用模型 ===", key=provider_key)
+            current_model = provider.model
+            lines = [header]
+            for m in models[:30]:
+                marker = " [当前]" if m == current_model else ""
+                lines.append(f"- {m}{marker}")
+            if len(models) > 30:
+                lines.append(f"... 还有 {len(models) - 30} 个模型未显示")
+            return await self._send_text(event, text="\n".join(lines), detail="models")
+
+        # /switch model <provider> <model>
+        if parts_lower[:1] == ["model"] and len(parts) >= 3:
+            provider_key = parts[1].casefold()
+            model_name = " ".join(parts[2:])
+            ok = self.provider_store.update_model(provider_key, model_name)
+            if not ok:
+                return await self._send_text(
+                    event,
+                    text=copy_text("switch.not_found",
+                                   "Provider {key} 不存在。", key=provider_key),
+                    detail="model_set_failed",
+                )
+            return await self._send_text(
+                event,
+                text=copy_text("switch.model_set",
+                               "已将 {key} 的模型设为 {model}。",
+                               key=provider_key, model=model_name),
+                detail="model_set",
+            )
+
+        # /switch add <key> <label> <base_url>
+        if parts_lower[:1] == ["add"] and len(parts) >= 4:
+            provider_key = parts[1].casefold()
+            label = parts[2]
+            base_url = parts[3]
+            ok = self.provider_store.add_provider(provider_key, label, base_url)
+            if not ok:
+                return await self._send_text(
+                    event,
+                    text=copy_text("switch.add_duplicate",
+                                   "Provider {key} 已存在。", key=provider_key),
+                    detail="add_duplicate",
+                )
+            return await self._send_text(
+                event,
+                text=copy_text("switch.add_success",
+                               "已添加 Provider：{key} ({label})，base_url={url}。"
+                               " 用 /switch key {key} <key> 设置 API Key。",
+                               key=provider_key, label=label, url=base_url),
+                detail="added",
+            )
+
+        # /switch add-url <key> <label> <base_url> — with optional URL that may contain /v1 etc
+        if parts_lower[:1] == ["add-url"] and len(parts) >= 4:
+            provider_key = parts[1].casefold()
+            label = parts[2]
+            base_url = parts[3]
+            ok = self.provider_store.add_provider(provider_key, label, base_url)
+            if not ok:
+                return await self._send_text(
+                    event,
+                    text=copy_text("switch.add_duplicate",
+                                   "Provider {key} 已存在。", key=provider_key),
+                    detail="add_duplicate",
+                )
+            return await self._send_text(
+                event,
+                text=copy_text("switch.add_success",
+                               "已添加 Provider：{key} ({label})，base_url={url}。"
+                               " 用 /switch key {key} <key> 设置 API Key。",
+                               key=provider_key, label=label, url=base_url),
+                detail="added",
+            )
+
+        # /switch 或 /switch list → 列表
+        lowered_body = lowered.strip()
+        if not lowered_body or lowered_body == "list":
+            providers = self.provider_store.list_all()
+            if not providers:
+                return await self._send_text(
+                    event,
+                    text=copy_text("switch.empty", "暂无已配置的 LLM Provider。"),
+                    detail="no_providers",
+                )
+            lines = [self.provider_store.switch_list_header()]
+            for p in providers:
+                lines.append(self.provider_store.switch_list_item(p.key, p.label, p.is_active))
+            return await self._send_text(event, text="\n".join(lines), detail="list")
+
+        # /switch <key> → 切换
+        ok = self.provider_store.set_active(lowered_body)
+        if not ok:
+            return await self._send_text(
+                event,
+                text=self.provider_store.switch_not_found(lowered_body),
+                detail="not_found",
+            )
+        active = self.provider_store.get_active()
+        label = active.label if active else lowered_body
+        return await self._send_text(
+            event,
+            text=self.provider_store.switch_success(lowered_body, label),
+            detail="switched",
+        )
 
     async def _dispatch_admin(
         self,

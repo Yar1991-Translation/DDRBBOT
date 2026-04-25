@@ -15,8 +15,10 @@ from .models import (
     ChatSession,
     DeliveryLog,
     DeliveryRecord,
+    LLMProviderRecord,
     MediaAsset,
     ProcessedEvent,
+    ProviderConfig,
     QQInboundEvent,
     RawEvent,
     RenderArtifact,
@@ -199,6 +201,17 @@ CREATE TABLE IF NOT EXISTS chat_knowledge_items (
 
 CREATE INDEX IF NOT EXISTS idx_chat_knowledge_priority
   ON chat_knowledge_items(priority DESC, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS llm_providers (
+  id TEXT PRIMARY KEY,
+  label TEXT NOT NULL DEFAULT '',
+  base_url TEXT NOT NULL,
+  api_key TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL,
+  is_active INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 
@@ -1329,6 +1342,149 @@ class SQLiteRepository:
             rows = connection.execute(statement, tuple(parameters)).fetchall()
         return [self._row_to_chat_knowledge_item(row) for row in rows]
 
+    # ------------------------------------------------------------------
+    # llm_providers
+    # ------------------------------------------------------------------
+
+    def _row_to_llm_provider_record(self, row: Any) -> LLMProviderRecord:
+        return LLMProviderRecord(
+            id=row["id"],
+            label=row["label"] or "",
+            base_url=row["base_url"] or "",
+            api_key=row["api_key"] or "",
+            model=row["model"] or "",
+            is_active=bool(row["is_active"]),
+            created_at=row["created_at"] or "",
+            updated_at=row["updated_at"] or "",
+        )
+
+    def _row_to_provider_config(self, row: Any) -> ProviderConfig:
+        return ProviderConfig(
+            key=row["id"],
+            label=row["label"] or "",
+            base_url=row["base_url"] or "",
+            api_key=row["api_key"] or "",
+            model=row["model"] or "",
+            is_active=bool(row["is_active"]),
+        )
+
+    def upsert_llm_provider(self, record: LLMProviderRecord) -> None:
+        with self._lock:
+            connection = self._get_connection()
+            connection.execute(
+                "INSERT OR REPLACE INTO llm_providers "
+                "(id, label, base_url, api_key, model, is_active, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    record.id, record.label, record.base_url, record.api_key,
+                    record.model, int(record.is_active), record.created_at, record.updated_at,
+                ),
+            )
+
+    def list_llm_providers(self) -> list[LLMProviderRecord]:
+        with self._lock:
+            connection = self._get_connection()
+            rows = connection.execute(
+                "SELECT * FROM llm_providers ORDER BY label"
+            ).fetchall()
+        return [self._row_to_llm_provider_record(row) for row in rows]
+
+    def get_active_llm_provider(self) -> ProviderConfig | None:
+        with self._lock:
+            connection = self._get_connection()
+            row = connection.execute(
+                "SELECT * FROM llm_providers WHERE is_active = 1 LIMIT 1"
+            ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_provider_config(row)
+
+    def set_active_llm_provider(self, provider_id: str) -> bool:
+        with self._lock:
+            connection = self._get_connection()
+            exists = connection.execute(
+                "SELECT id FROM llm_providers WHERE id = ?", (provider_id,)
+            ).fetchone()
+            if not exists:
+                return False
+            connection.execute("UPDATE llm_providers SET is_active = 0")
+            connection.execute(
+                "UPDATE llm_providers SET is_active = 1, updated_at = ? WHERE id = ?",
+                (isoformat_z(utc_now()), provider_id),
+            )
+        return True
+
+    def insert_llm_provider(self, record: LLMProviderRecord) -> bool:
+        """Insert a new provider if id doesn't exist. Returns True if inserted."""
+        with self._lock:
+            connection = self._get_connection()
+            existing = connection.execute(
+                "SELECT id FROM llm_providers WHERE id = ?", (record.id,)
+            ).fetchone()
+            if existing:
+                return False
+            connection.execute(
+                "INSERT INTO llm_providers (id, label, base_url, api_key, model, is_active, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    record.id, record.label, record.base_url, record.api_key,
+                    record.model, int(record.is_active), record.created_at, record.updated_at,
+                ),
+            )
+        return True
+
+    def update_llm_provider_api_key(self, provider_id: str, api_key: str) -> bool:
+        with self._lock:
+            connection = self._get_connection()
+            existing = connection.execute(
+                "SELECT id FROM llm_providers WHERE id = ?", (provider_id,)
+            ).fetchone()
+            if not existing:
+                return False
+            connection.execute(
+                "UPDATE llm_providers SET api_key = ?, updated_at = ? WHERE id = ?",
+                (api_key, isoformat_z(utc_now()), provider_id),
+            )
+        return True
+
+    def update_llm_provider_model(self, provider_id: str, model: str) -> bool:
+        with self._lock:
+            connection = self._get_connection()
+            existing = connection.execute(
+                "SELECT id FROM llm_providers WHERE id = ?", (provider_id,)
+            ).fetchone()
+            if not existing:
+                return False
+            connection.execute(
+                "UPDATE llm_providers SET model = ?, updated_at = ? WHERE id = ?",
+                (model, isoformat_z(utc_now()), provider_id),
+            )
+        return True
+
+    def update_llm_provider_base_url(self, provider_id: str, base_url: str) -> bool:
+        with self._lock:
+            connection = self._get_connection()
+            existing = connection.execute(
+                "SELECT id FROM llm_providers WHERE id = ?", (provider_id,)
+            ).fetchone()
+            if not existing:
+                return False
+            connection.execute(
+                "UPDATE llm_providers SET base_url = ?, updated_at = ? WHERE id = ?",
+                (base_url, isoformat_z(utc_now()), provider_id),
+            )
+        return True
+
+    def get_llm_provider(self, provider_id: str) -> LLMProviderRecord | None:
+        with self._lock:
+            connection = self._get_connection()
+            row = connection.execute(
+                "SELECT * FROM llm_providers WHERE id = ?", (provider_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_llm_provider_record(row)
+
     def get_stats(self) -> dict[str, int]:
         with self._lock:
             connection = self._get_connection()
@@ -1348,6 +1504,7 @@ class SQLiteRepository:
                 "chat_personas": count("SELECT COUNT(*) FROM chat_personas"),
                 "chat_profiles": count("SELECT COUNT(*) FROM chat_profiles"),
                 "chat_knowledge_items": count("SELECT COUNT(*) FROM chat_knowledge_items"),
+                "llm_providers": count("SELECT COUNT(*) FROM llm_providers"),
             }
 
     def _ensure_source_locked(

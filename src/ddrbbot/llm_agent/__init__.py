@@ -1,6 +1,7 @@
 from .agent import AgentContext, AgentRunResult, LLMAgent
 from .chat_service import ChatService, ChatTurnRequest, ChatTurnResult
 from .context_builder import BuiltContext, ChatContextBuilder, ContextBuildConfig
+from .provider_store import ProviderStore
 from .persona_store import (
     DEFAULT_PERSONA_KEY,
     ActivePersona,
@@ -34,4 +35,5 @@ __all__ = [
     "profile_scope_for",
     "session_key_for_event",
     "session_scope",
+    "ProviderStore",
 ]

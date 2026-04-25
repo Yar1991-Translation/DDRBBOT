@@ -56,6 +56,23 @@
     "forget_done": "当前会话的历史已经清空了。",
     "history_status": "当前会话共保留了 {count} 条消息。"
   },
+  "switch": {
+    "not_available": "Provider 切换功能未启用。",
+    "empty": "暂无已配置的 LLM Provider。使用 /switch add <key> <label> <base_url> 添加。",
+    "list_header": "可用的 LLM Provider：",
+    "list_item": "- {key}: {label}{marker}",
+    "success": "已切换到 {label} ({key})。",
+    "not_found": "没有找到 provider：{key}。用 /switch list 查看可用列表。",
+    "key_set": "已为 {key} 设置 API Key。",
+    "key_not_found": "Provider {key} 不存在，请先用 /switch add <key> <label> <base_url> 添加。",
+    "models_header": "=== {key} 可用模型（当前: {model}）===",
+    "models_need_key": "{key} 没有 API Key，请先用 /switch key {key} <key> 设置。",
+    "models_failed": "获取 {key} 模型列表失败：{error}",
+    "models_empty": "{key} 未返回任何模型。",
+    "model_set": "已将 {key} 的模型设为 {model}。",
+    "add_success": "已添加 Provider：{key} ({label})，base_url={url}。用 /switch key {key} <key> 设置 API Key，/switch models {key} 获取模型。",
+    "add_duplicate": "Provider {key} 已存在，无需重复添加。"
+  },
   "personas": {
     "defaults": [
       {

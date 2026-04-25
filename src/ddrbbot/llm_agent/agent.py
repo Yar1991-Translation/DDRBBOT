@@ -48,20 +48,33 @@ class LLMAgent:
         settings: Settings,
         tool_registry: Any = None,
         registry: Any = None,
+        provider_store: Any = None,
     ) -> None:
         self.settings = settings
+        self._provider_store = provider_store
         chosen = tool_registry if tool_registry is not None else registry
         if chosen is None:
             raise ValueError("LLMAgent requires tool_registry (or registry=) argument")
         self.tool_registry = chosen
 
+    def _resolve_llm_config(self) -> tuple[str | None, str | None, str | None]:
+        """Returns (base_url, model, api_key) from active provider or settings fallback."""
+        if self._provider_store is not None:
+            active = self._provider_store.get_active()
+            if active and active.base_url and active.model:
+                return active.base_url, active.model, (active.api_key or None)
+        return (
+            self.settings.llm_base_url,
+            self.settings.llm_model,
+            self.settings.llm_api_key,
+        )
+
     @property
     def enabled(self) -> bool:
-        return bool(
-            self.settings.llm_agent_enabled
-            and self.settings.llm_base_url
-            and self.settings.llm_model
-        )
+        if not self.settings.llm_agent_enabled:
+            return False
+        base_url, model, _ = self._resolve_llm_config()
+        return bool(base_url and model)
 
     async def run(
         self,
@@ -147,8 +160,9 @@ class LLMAgent:
         messages: list[dict[str, Any]],
         tools_payload: list[dict[str, Any]],
     ) -> dict[str, Any]:
+        base_url, model, api_key = self._resolve_llm_config()
         body: dict[str, Any] = {
-            "model": self.settings.llm_model,
+            "model": model or self.settings.llm_model,
             "temperature": self.settings.llm_agent_temperature,
             "messages": messages,
         }
@@ -157,12 +171,12 @@ class LLMAgent:
             body["tool_choice"] = "auto"
 
         headers = {"Content-Type": "application/json"}
-        if self.settings.llm_api_key:
-            headers["Authorization"] = f"Bearer {self.settings.llm_api_key}"
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
 
         async with httpx.AsyncClient(timeout=self.settings.llm_timeout_seconds) as client:
             response = await client.post(
-                f"{str(self.settings.llm_base_url).rstrip('/')}/chat/completions",
+                f"{str(base_url or self.settings.llm_base_url).rstrip('/')}/chat/completions",
                 json=body,
                 headers=headers,
             )

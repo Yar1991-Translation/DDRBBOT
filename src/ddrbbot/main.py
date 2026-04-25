@@ -56,6 +56,7 @@ from .llm_agent import (
     ChatTurnRequest,
     LLMAgent,
     PersonaStore,
+    ProviderStore,
     build_default_registry,
     coerce_custom_persona,
 )
@@ -81,30 +82,46 @@ from .logging_setup import configure_logging
 from .utils import make_external_id, utc_now
 
 
-def _rsshub2_seed_sources() -> list[dict[str, str]]:
-    base = "https://rsshub2.asailor.org"
+def _seed_sources() -> list[dict[str, str]]:
+    """All seed sources for auto-registration at startup.
+
+    ``feed_type`` is ``"rsshub"`` (needs validate_rsshub_feed_url host check)
+    or ``"direct"`` (plain RSS, no host validation).
+    """
+    rsshub_base = "https://rsshub2.asailor.org"
     return [
-        {
-            "name": "Roblox Forsaken Official X",
-            "feed_url": f"{base}/x/user/forsaken2024",
-            "credibility_level": "official",
-        },
-        {
-            "name": "Roblox DOORS Official X",
-            "feed_url": f"{base}/x/user/doorsgame",
-            "credibility_level": "official",
-        },
-        {
-            "name": "Forsaken Wiki",
-            "feed_url": f"{base}/fandom/wiki/forsaken2024",
-            "credibility_level": "community",
-        },
-        {
-            "name": "DOORS Wiki",
-            "feed_url": f"{base}/fandom/wiki/doors-game",
-            "credibility_level": "community",
-        },
+        # RSSHub sources
+        {"name": "Roblox Forsaken Official X", "feed_url": f"{rsshub_base}/x/user/forsaken2024", "credibility_level": "official", "feed_type": "rsshub"},
+        {"name": "Roblox DOORS Official X", "feed_url": f"{rsshub_base}/x/user/doorsgame", "credibility_level": "official", "feed_type": "rsshub"},
+        {"name": "Forsaken Wiki", "feed_url": f"{rsshub_base}/fandom/wiki/forsaken2024", "credibility_level": "community", "feed_type": "rsshub"},
+        {"name": "DOORS Wiki", "feed_url": f"{rsshub_base}/fandom/wiki/doors-game", "credibility_level": "community", "feed_type": "rsshub"},
+        # Direct RSS sources (no RSSHub host validation needed)
+        {"name": "Roblox DevForum Updates", "feed_url": "https://devforum.roblox.com/c/updates/45.rss", "credibility_level": "official", "feed_type": "direct"},
     ]
+
+
+def _rsshub2_seed_sources() -> list[dict[str, str]]:
+    """RSSHub-only seed sources (backward compat, used by bootstrap endpoint)."""
+    return [s for s in _seed_sources() if s.get("feed_type") == "rsshub"]
+
+
+def _auto_register_seed_sources(services: AppServices) -> None:
+    """Register seed sources at startup. Idempotent — upsert does nothing if already registered."""
+    for item in _seed_sources():
+        if item.get("feed_type") == "rsshub":
+            feed_url = validate_rsshub_feed_url(
+                item["feed_url"],
+                host_markers=services.settings.rsshub_host_markers,
+                extra_hosts=services.settings.rsshub_extra_hosts,
+            )
+        else:
+            feed_url = item["feed_url"]
+        services.repository.upsert_source_registration(
+            source_type="rss",
+            name=item["name"],
+            feed_url=feed_url,
+            credibility_level=item["credibility_level"],
+        )
 
 
 def create_app() -> FastAPI:
@@ -115,7 +132,9 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         services.repository.initialize()
+        _auto_register_seed_sources(services)
         services.persona_store.seed_defaults()
+        services.provider_store.seed_defaults()
         await services.pipeline.start()
         await services.delivery_worker.start()
         await services.ws_client.start()
@@ -175,7 +194,24 @@ def _build_services(settings: Settings) -> AppServices:
         bot_adapter=bot_adapter,
         delivery_service=delivery_service,
     )
-    llm_agent = LLMAgent(settings=settings, registry=tool_registry)
+    # Parse provider seeds from JSON env var, fall back to legacy LLM_* vars
+    provider_seeds: list[dict[str, str]] = []
+    if settings.llm_provider_seeds_json:
+        import json as _json
+        try:
+            provider_seeds = _json.loads(settings.llm_provider_seeds_json)
+        except Exception:
+            pass
+    if not provider_seeds and settings.llm_base_url and settings.llm_model:
+        provider_seeds = [{
+            "key": "default",
+            "label": "Default",
+            "base_url": settings.llm_base_url,
+            "api_key": settings.llm_api_key or "",
+            "model": settings.llm_model,
+        }]
+    provider_store = ProviderStore(repository=repository, seed_providers=provider_seeds)
+    llm_agent = LLMAgent(settings=settings, registry=tool_registry, provider_store=provider_store)
     persona_store = PersonaStore(repository=repository)
     chat_service = ChatService(
         repository=repository,
@@ -192,6 +228,7 @@ def _build_services(settings: Settings) -> AppServices:
         llm_agent=llm_agent,
         chat_service=chat_service,
         persona_store=persona_store,
+        provider_store=provider_store,
     )
     ws_client = NapCatWSClient(
         settings=settings,
@@ -214,6 +251,7 @@ def _build_services(settings: Settings) -> AppServices:
         agent_scheduler=agent_scheduler,
         persona_store=persona_store,
         chat_service=chat_service,
+        provider_store=provider_store,
     )
 
 

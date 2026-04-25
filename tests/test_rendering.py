@@ -53,6 +53,7 @@ def _settings(tmp_path: Path) -> Settings:
         google_custom_search_api_key=None,
         google_custom_search_engine_id=None,
         bing_search_api_key=None,
+        llm_provider_seeds_json=None,
     )
 
 
